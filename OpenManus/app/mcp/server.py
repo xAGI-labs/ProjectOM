@@ -61,6 +61,8 @@ class PromptResponse(BaseModel):
     status: str
     message: str
     results: Optional[str] = None
+    thoughts: Optional[List[str]] = None  # Add thoughts field
+    browser_screenshot: Optional[str] = None  # Field to store base64 screenshot
 
 # Store active tasks
 active_tasks = {}
@@ -239,10 +241,23 @@ class TaskOutput:
     def __init__(self):
         self.buffer = io.StringIO()
         self.logs = []
+        self.thoughts = []  # Detailed thoughts storage
+        self.browser_screenshot = None
         
     def write(self, text):
         self.buffer.write(text)
         self.logs.append(text)
+        
+        # Capture only meaningful thoughts, not the generic thinking processes
+        if "✨ Manus's thoughts:" in text:
+            # This is a meaningful thought from Manus
+            self.thoughts.append(text.strip())
+        elif "🎯 Tool" in text and "completed its mission" in text:
+            # Capture significant tool execution results
+            self.thoughts.append(text.strip())
+        elif "app.agent.toolcall:think:" in text and "Manus selected" in text:
+            # Capture tool selection
+            self.thoughts.append(text.strip())
         
     def flush(self):
         self.buffer.flush()
@@ -252,6 +267,15 @@ class TaskOutput:
 
     def get_logs(self):
         return self.logs
+        
+    def get_thoughts(self):
+        return self.thoughts
+    
+    def update_screenshot(self, screenshot):
+        self.browser_screenshot = screenshot
+        
+    def get_screenshot(self):
+        return self.browser_screenshot
 
 async def process_in_background(task_id: str, prompt: str):
     """Process the prompt in the background using OpenManus."""
@@ -260,13 +284,42 @@ async def process_in_background(task_id: str, prompt: str):
         logger.info(f"Processing task {task_id}: {prompt}")
         active_tasks[task_id]["status"] = "processing"
         active_tasks[task_id]["logs"] = []
+        active_tasks[task_id]["thoughts"] = []  # Initialize thoughts
         
-        # Create an instance of the Manus agent instead of non-existent Agent class
+        # Create an instance of the Manus agent
         llm = LLM()
-        agent = Manus(llm=llm)  # Using Manus agent which handles browser automation
+        agent = Manus(llm=llm, verbose=True)  # Enable verbose mode to get detailed thoughts
         
         # Redirect stdout/stderr to capture output
         with contextlib.redirect_stdout(task_output), contextlib.redirect_stderr(task_output):
+            # Capture browser screenshots during processing
+            async def screenshot_capturer():
+                while task_id in active_tasks and active_tasks[task_id]["status"] == "processing":
+                    try:
+                        if hasattr(agent, "browser_context_helper") and agent.browser_context_helper:
+                            browser_state = await agent.browser_context_helper.get_browser_state()
+                            if browser_state and "_current_base64_image" in dir(agent.browser_context_helper):
+                                screenshot = agent.browser_context_helper._current_base64_image
+                                if screenshot:
+                                    active_tasks[task_id]["browser_screenshot"] = screenshot
+                                    task_output.update_screenshot(screenshot)
+                    except Exception as e:
+                        logger.warning(f"Failed to capture browser screenshot: {str(e)}")
+                    await asyncio.sleep(1)
+            
+            # Start the screenshot capturer task
+            screenshot_task = asyncio.create_task(screenshot_capturer())
+            
+            # Real-time thought update task with more frequent updates
+            async def thought_updater():
+                while task_id in active_tasks and active_tasks[task_id]["status"] == "processing":
+                    # Update thoughts in real-time
+                    active_tasks[task_id]["thoughts"] = task_output.get_thoughts()
+                    await asyncio.sleep(0.2)  # Update thoughts even more frequently (200ms)
+            
+            # Start the thought updater task
+            thought_task = asyncio.create_task(thought_updater())
+            
             # Process the prompt with OpenManus
             logger.warning(f"Processing your request...")
             
@@ -280,6 +333,8 @@ async def process_in_background(task_id: str, prompt: str):
         active_tasks[task_id]["status"] = "completed"
         active_tasks[task_id]["result"] = final_output
         active_tasks[task_id]["logs"] = task_output.get_logs()
+        active_tasks[task_id]["thoughts"] = task_output.get_thoughts()
+        active_tasks[task_id]["browser_screenshot"] = task_output.get_screenshot()
         
         logger.info(f"Completed task {task_id}")
     except Exception as e:
@@ -287,32 +342,40 @@ async def process_in_background(task_id: str, prompt: str):
         active_tasks[task_id]["status"] = "error"
         active_tasks[task_id]["error"] = str(e)
         active_tasks[task_id]["logs"] = task_output.get_logs()
+        active_tasks[task_id]["thoughts"] = task_output.get_thoughts()
 
 @app.get("/api/tasks/{task_id}", response_model=PromptResponse)
 async def get_task_status(task_id: str):
     """Get the status of a specific task."""
     if task_id not in active_tasks:
-        return PromptResponse(status="error", message="Task not found")
+        return PromptResponse(status="error", message=f"Task ID {task_id} not found")
     
     task = active_tasks[task_id]
+    thoughts = task.get("thoughts", [])
+    browser_screenshot = task.get("browser_screenshot")
+    
     if task["status"] == "completed":
         return PromptResponse(
             status="success",
-            message="Task completed",
-            results=task.get("result", "No results available")
+            message=f"Task {task_id} completed",
+            results=task.get("result", ""),
+            thoughts=thoughts,
+            browser_screenshot=browser_screenshot
         )
     elif task["status"] == "error":
         return PromptResponse(
             status="error",
-            message=f"Task failed: {task.get('error', 'Unknown error')}",
-            results="\n".join(task.get("logs", []))
+            message=f"Error in task {task_id}: {task.get('error', 'Unknown error')}",
+            thoughts=thoughts,
+            browser_screenshot=browser_screenshot
         )
     else:
-        # If task is still processing, return the logs so far
+        # Return in-progress thoughts and screenshot
         return PromptResponse(
-            status="processing", 
-            message="Task is still processing",
-            results="\n".join(task.get("logs", []))
+            status="processing",
+            message=f"Task {task_id} is still processing",
+            thoughts=thoughts,
+            browser_screenshot=browser_screenshot
         )
 
 def parse_args() -> argparse.Namespace:
