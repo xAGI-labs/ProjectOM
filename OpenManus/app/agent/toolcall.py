@@ -37,7 +37,10 @@ class ToolCallAgent(ReActAgent):
     max_observe: Optional[Union[int, bool]] = None
 
     async def think(self) -> bool:
-        """Process current state and decide next actions using tools"""
+        """Process current state and decide next actions using tools."""
+        # Log thinking process explicitly
+        print(f"🤔 [THINKING] Processing current state and planning next actions...")
+        
         if self.next_step_prompt:
             user_msg = Message.user_message(self.next_step_prompt)
             self.messages += [user_msg]
@@ -117,6 +120,10 @@ class ToolCallAgent(ReActAgent):
             # For 'auto' mode, continue with content if no commands but content exists
             if self.tool_choices == ToolChoice.AUTO and not self.tool_calls:
                 return bool(content)
+
+            # Log the decision
+            if self.tool_calls:
+                print(f"🤔 [THINKING] Decided to use tool: {self.tool_calls[0].function.name}")
 
             return bool(self.tool_calls)
         except Exception as e:

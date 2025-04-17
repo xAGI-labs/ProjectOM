@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 
 export default function Home() {
@@ -8,35 +8,38 @@ export default function Home() {
   const [messages, setMessages] = useState<Array<{ type: string; content: string }>>([]);
   const [loading, setLoading] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [thinking, setThinking] = useState<string[]>([]); 
+  const [browserScreenshot, setBrowserScreenshot] = useState<string | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastThoughtCountRef = useRef<number>(0);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!prompt.trim()) return;
-    
-    // Add user message to chat
+
     const userMessage = { type: "user", content: prompt };
     setMessages((prev) => [...prev, userMessage]);
-    
-    // Show loading state
+
     setLoading(true);
-    
+    setThinking([]);
+    lastThoughtCountRef.current = 0;
+
     try {
-      // Submit the prompt to the backend
       const response = await fetch('/api/prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
       });
-      
+
       const data = await response.json();
-      
+
       if (data.status === 'success') {
         setTaskId(data.message.split(':')[1].trim());
-        
-        // Start polling for results
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+        }
         pollForResults(data.message.split(':')[1].trim());
       } else {
-        // Show error message
         setMessages((prev) => [...prev, { type: "system", content: `Error: ${data.message}` }]);
         setLoading(false);
       }
@@ -45,40 +48,111 @@ export default function Home() {
       setMessages((prev) => [...prev, { type: "system", content: "Failed to connect to the server." }]);
       setLoading(false);
     }
-    
-    // Clear input
+
     setPrompt("");
   };
-  
-  const pollForResults = async (id: string) => {
-    // Poll for results every 1 second
+
+  const pollForResults = (taskId: string) => {
     const interval = setInterval(async () => {
       try {
-        const response = await fetch(`/api/tasks/${id}`);
+        const response = await fetch(`/api/tasks/${taskId}`);
         const data = await response.json();
         
-        if (data.status === 'success') {
-          // Results are ready
+        console.log("Poll response:", data);
+        
+        if (data.thoughts && Array.isArray(data.thoughts)) {
+          if (data.thoughts.length > lastThoughtCountRef.current) {
+            console.log(`New thoughts: ${data.thoughts.length - lastThoughtCountRef.current}`);
+            setThinking(data.thoughts);
+            lastThoughtCountRef.current = data.thoughts.length;
+          }
+        }
+        
+        if (data.browser_screenshot) {
+          setBrowserScreenshot(data.browser_screenshot);
+        }
+        
+        if (data.status === 'success' && data.results) {
           clearInterval(interval);
-          setMessages((prev) => [...prev, { type: "assistant", content: data.results }]);
+          pollIntervalRef.current = null;
+          
+          const finalThought = data.thoughts.find((t: string) => 
+            t.includes("✨ Manus's thoughts:") && 
+            (t.includes("I now have the answer") || t.includes("current president of Nepal"))
+          );
+          
+          const finalAnswer = finalThought ? 
+            finalThought.split("✨ Manus's thoughts:")[1].trim() : 
+            data.results;
+            
+          setMessages((prev) => [...prev, { type: "assistant", content: finalAnswer }]);
           setLoading(false);
           setTaskId(null);
+          
+          setTimeout(() => {
+            setThinking([]);
+            setBrowserScreenshot(null);
+          }, 2000);
         } else if (data.status === 'error') {
-          // Error occurred
           clearInterval(interval);
+          pollIntervalRef.current = null;
           setMessages((prev) => [...prev, { type: "system", content: `Error: ${data.message}` }]);
           setLoading(false);
           setTaskId(null);
+          setThinking([]);
+          setBrowserScreenshot(null);
         }
-        // If still processing, continue polling
       } catch (error) {
         console.error('Error polling for results:', error);
         clearInterval(interval);
+        pollIntervalRef.current = null;
         setMessages((prev) => [...prev, { type: "system", content: "Failed to retrieve results." }]);
         setLoading(false);
         setTaskId(null);
+        setThinking([]);
+        setBrowserScreenshot(null);
       }
-    }, 1000);
+    }, 500);
+    
+    pollIntervalRef.current = interval;
+    return interval;
+  };
+
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const formatThought = (thought: string) => {
+    if (thought.includes("✨ Manus's thoughts:")) {
+      return thought.split("✨ Manus's thoughts:")[1].trim();
+    } else if (thought.includes("🎯 Tool") && thought.includes("completed its mission")) {
+      const resultPart = thought.includes("Result:") ? 
+        thought.split("Result:")[1].trim() : 
+        thought.split("completed its mission!")[1].trim();
+      return `Result: ${resultPart}`;
+    } else if (thought.includes("🧰 Tools being prepared:")) {
+      return `Using tools: ${thought.split("🧰 Tools being prepared:")[1].trim()}`;
+    } else if (thought.includes("🔧 Tool arguments:")) {
+      const args = thought.split("🔧 Tool arguments:")[1].trim();
+      try {
+        const argObj = JSON.parse(args);
+        return `With parameters: ${Object.entries(argObj).map(([k, v]) => `${k}=${v}`).join(", ")}`;
+      } catch {
+        return `With parameters: ${args}`;
+      }
+    }
+    return thought;
+  };
+
+  const isMainThought = (thought: string) => {
+    return thought.includes("✨ Manus's thoughts:") || 
+           thought.includes("🎯 Tool") || 
+           thought.includes("🧰 Tools being prepared:") ||
+           thought.includes("🔧 Tool arguments:");
   };
 
   return (
@@ -86,10 +160,10 @@ export default function Home() {
       <header className="flex items-center justify-center py-4 border-b dark:border-gray-700">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">ProjectOM</h1>
       </header>
-      
+
       <main className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.length === 0 ? (
+          {messages.length === 0 && thinking.length === 0 && !browserScreenshot ? (
             <div className="flex flex-col items-center justify-center h-full">
               <Image
                 src="/manus-logo.svg"
@@ -104,37 +178,70 @@ export default function Home() {
               </h2>
             </div>
           ) : (
-            messages.map((message, index) => (
-              <div
-                key={index}
-                className={`p-4 rounded-lg ${
-                  message.type === "user"
-                    ? "bg-blue-100 dark:bg-blue-900 ml-auto max-w-[80%]"
-                    : message.type === "assistant"
-                    ? "bg-gray-100 dark:bg-gray-800 mr-auto max-w-[80%]"
-                    : "bg-red-100 dark:bg-red-900 mx-auto max-w-[90%]"
-                }`}
-              >
-                <p className="text-sm font-medium mb-1">
-                  {message.type === "user" ? "You" : message.type === "assistant" ? "Manus" : "System"}
-                </p>
-                <div className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
-                  {message.content}
+            <>
+              {messages.map((message, index) => (
+                <div
+                  key={index}
+                  className={`p-4 rounded-lg ${
+                    message.type === "user"
+                      ? "bg-blue-100 dark:bg-blue-900 ml-auto max-w-[80%]"
+                      : message.type === "assistant"
+                      ? "bg-gray-100 dark:bg-gray-800 mr-auto max-w-[80%]"
+                      : "bg-red-100 dark:bg-red-900 mx-auto max-w-[90%]"
+                  }`}
+                >
+                  <p className="text-sm font-medium mb-1">
+                    {message.type === "user" ? "You" : message.type === "assistant" ? "Manus" : "System"}
+                  </p>
+                  <div className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
+                    {message.content}
+                  </div>
                 </div>
-              </div>
-            ))
-          )}
-          
-          {loading && (
-            <div className="flex items-center justify-center p-4">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900 dark:border-white"></div>
-              <p className="ml-2 text-gray-600 dark:text-gray-300">
-                {taskId ? "Processing your request..." : "Sending..."}
-              </p>
-            </div>
+              ))}
+
+              {browserScreenshot && (
+                <div className="p-4 rounded-lg bg-white dark:bg-gray-800 mx-auto w-full max-w-3xl shadow-md browser-preview">
+                  <p className="text-sm font-medium mb-2 text-center">Browser View</p>
+                  <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+                    <img 
+                      src={`data:image/jpeg;base64,${browserScreenshot}`} 
+                      alt="Browser View" 
+                      className="absolute top-0 left-0 w-full h-full object-contain rounded-md" 
+                    />
+                  </div>
+                </div>
+              )}
+
+              {loading && (
+                <div className="flex-1 overflow-y-auto">
+                  {thinking.filter(isMainThought).length > 0 ? (
+                    <div className="p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900 mr-auto max-w-[90%]">
+                      <p className="text-sm font-medium mb-2 flex items-center">
+                        <span>Manus is thinking</span>
+                        <span className="ml-1 thinking">...</span>
+                      </p>
+                      <div className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap max-h-80 overflow-y-auto">
+                        {thinking.filter(isMainThought).map((thought, idx) => (
+                          <div key={idx} className="mb-2 p-2 border-b border-yellow-200 dark:border-yellow-800 last:border-0 thought-item">
+                            <p className="text-sm">{formatThought(thought)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center p-4">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900 dark:border-white"></div>
+                      <p className="ml-2 text-gray-600 dark:text-gray-300">
+                        {taskId ? "Processing your request..." : "Sending..."}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
-        
+
         <form onSubmit={handleSubmit} className="border-t p-4 dark:border-gray-700">
           <div className="flex items-center space-x-2">
             <input

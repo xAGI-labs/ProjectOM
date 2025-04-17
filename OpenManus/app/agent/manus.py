@@ -26,6 +26,8 @@ class Manus(ToolCallAgent):
     max_observe: int = 10000
     max_steps: int = 20
 
+    verbose: bool = Field(default=False, description="Whether to output verbose logs")
+
     # Add general-purpose tools to the tool collection
     available_tools: ToolCollection = Field(
         default_factory=lambda: ToolCollection(
@@ -44,6 +46,11 @@ class Manus(ToolCallAgent):
 
     async def think(self) -> bool:
         """Process current state and decide next actions with appropriate context."""
+        # Add explicit thought logging
+        if self.verbose:
+            print(f"🤔 [THINKING] Starting to analyze the task: {self.memory.messages[-1].content if self.memory.messages else ''}")
+            
+        # Add browser context if needed
         original_prompt = self.next_step_prompt
         recent_messages = self.memory.messages[-3:] if self.memory.messages else []
         browser_in_use = any(
@@ -54,12 +61,28 @@ class Manus(ToolCallAgent):
         )
 
         if browser_in_use:
+            if self.verbose:
+                print(f"🤔 [THINKING] Browser is in use, getting browser context...")
+                
             self.next_step_prompt = (
                 await self.browser_context_helper.format_next_step_prompt()
             )
 
+        # Ensure we always capture a browser screenshot when applicable
+        if self.browser_context_helper:
+            await self.browser_context_helper.get_browser_state()
+
+        # Before calling the parent's think method, log that we're deciding on action
+        if self.verbose:
+            print(f"🤔 [THINKING] Evaluating available tools and deciding on next action...")
+        
         result = await super().think()
 
+        # Log the chosen action
+        if self.verbose and self.memory.messages and hasattr(self.memory.messages[-1], 'tool_calls') and self.memory.messages[-1].tool_calls:
+            tool_call = self.memory.messages[-1].tool_calls[0]
+            print(f"🤔 [THINKING] I've decided to use {tool_call.function.name} tool to {tool_call.function.arguments}")
+            
         # Restore original prompt
         self.next_step_prompt = original_prompt
 

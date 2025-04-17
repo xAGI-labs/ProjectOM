@@ -29,3 +29,72 @@ body {
 .dark {
   color-scheme: dark;
 }
+
+/* Thinking animation style */
+@keyframes thinkingDots {
+  0%, 20% { content: "."; }
+  40% { content: ".."; }
+  60%, 100% { content: "..."; }
+}
+
+.thinking::after {
+  content: "";
+  display: inline-block;
+  animation: thinkingDots 1.5s infinite;
+}
+
+/* Subtle slide-in animation for new thoughts */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.text-sm {
+  animation: slideIn 0.3s ease-out;
+}
+
+.thought-item {
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Pulse animation for thinking box */
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+/* Browser preview styling */
+.browser-preview {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+}
+
+.browser-preview img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.browser-preview:hover {
+  transform: scale(1.01);
+  box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+}
