@@ -1,103 +1,160 @@
+"use client";
+
+import { useState } from "react";
 import Image from "next/image";
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [prompt, setPrompt] = useState("");
+  const [messages, setMessages] = useState<Array<{ type: string; content: string }>>([]);
+  const [loading, setLoading] = useState(false);
+  const [taskId, setTaskId] = useState<string | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prompt.trim()) return;
+    
+    // Add user message to chat
+    const userMessage = { type: "user", content: prompt };
+    setMessages((prev) => [...prev, userMessage]);
+    
+    // Show loading state
+    setLoading(true);
+    
+    try {
+      // Submit the prompt to the backend
+      const response = await fetch('/api/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setTaskId(data.message.split(':')[1].trim());
+        
+        // Start polling for results
+        pollForResults(data.message.split(':')[1].trim());
+      } else {
+        // Show error message
+        setMessages((prev) => [...prev, { type: "system", content: `Error: ${data.message}` }]);
+        setLoading(false);
+      }
+    } catch (error) {
+      console.error('Error submitting prompt:', error);
+      setMessages((prev) => [...prev, { type: "system", content: "Failed to connect to the server." }]);
+      setLoading(false);
+    }
+    
+    // Clear input
+    setPrompt("");
+  };
+  
+  const pollForResults = async (id: string) => {
+    // Poll for results every 1 second
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/tasks/${id}`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+          // Results are ready
+          clearInterval(interval);
+          setMessages((prev) => [...prev, { type: "assistant", content: data.results }]);
+          setLoading(false);
+          setTaskId(null);
+        } else if (data.status === 'error') {
+          // Error occurred
+          clearInterval(interval);
+          setMessages((prev) => [...prev, { type: "system", content: `Error: ${data.message}` }]);
+          setLoading(false);
+          setTaskId(null);
+        }
+        // If still processing, continue polling
+      } catch (error) {
+        console.error('Error polling for results:', error);
+        clearInterval(interval);
+        setMessages((prev) => [...prev, { type: "system", content: "Failed to retrieve results." }]);
+        setLoading(false);
+        setTaskId(null);
+      }
+    }, 1000);
+  };
+
+  return (
+    <div className="flex flex-col min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
+      <header className="flex items-center justify-center py-4 border-b dark:border-gray-700">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">ProjectOM</h1>
+      </header>
+      
+      <main className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full">
+              <Image
+                src="/manus-logo.svg"
+                alt="Manus Logo"
+                width={120}
+                height={120}
+                className="mb-4 opacity-50"
+                priority
+              />
+              <h2 className="text-xl text-gray-500 dark:text-gray-400">
+                Hello! What can I do for you today?
+              </h2>
+            </div>
+          ) : (
+            messages.map((message, index) => (
+              <div
+                key={index}
+                className={`p-4 rounded-lg ${
+                  message.type === "user"
+                    ? "bg-blue-100 dark:bg-blue-900 ml-auto max-w-[80%]"
+                    : message.type === "assistant"
+                    ? "bg-gray-100 dark:bg-gray-800 mr-auto max-w-[80%]"
+                    : "bg-red-100 dark:bg-red-900 mx-auto max-w-[90%]"
+                }`}
+              >
+                <p className="text-sm font-medium mb-1">
+                  {message.type === "user" ? "You" : message.type === "assistant" ? "Manus" : "System"}
+                </p>
+                <div className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
+                  {message.content}
+                </div>
+              </div>
+            ))
+          )}
+          
+          {loading && (
+            <div className="flex items-center justify-center p-4">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900 dark:border-white"></div>
+              <p className="ml-2 text-gray-600 dark:text-gray-300">
+                {taskId ? "Processing your request..." : "Sending..."}
+              </p>
+            </div>
+          )}
         </div>
+        
+        <form onSubmit={handleSubmit} className="border-t p-4 dark:border-gray-700">
+          <div className="flex items-center space-x-2">
+            <input
+              type="text"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="Give Manus a task to work on..."
+              className="flex-1 p-2 border dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+              disabled={loading}
+            />
+            <button
+              type="submit"
+              disabled={loading || !prompt.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              Send
+            </button>
+          </div>
+        </form>
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }
