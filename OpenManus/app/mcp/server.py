@@ -248,22 +248,15 @@ class TaskOutput:
         self.buffer.write(text)
         self.logs.append(text)
         
-        # Capture detailed thoughts using specific patterns from logs
+        # Capture only meaningful thoughts, not the generic thinking processes
         if "✨ Manus's thoughts:" in text:
-            # Extract the actual thought content
-            thought_content = text.split("✨ Manus's thoughts:")[1].strip()
-            self.thoughts.append(f"✨ Manus's thoughts: {thought_content}")
-        elif "🛠️ Manus selected" in text:
-            # Capture tool selection thoughts
-            self.thoughts.append(text.strip())
-        elif "🧰 Tools being prepared:" in text:
-            # Capture tools preparation
-            self.thoughts.append(text.strip())
-        elif "🔧 Tool arguments:" in text:
-            # Capture tool arguments
+            # This is a meaningful thought from Manus
             self.thoughts.append(text.strip())
         elif "🎯 Tool" in text and "completed its mission" in text:
-            # Capture tool execution results
+            # Capture significant tool execution results
+            self.thoughts.append(text.strip())
+        elif "app.agent.toolcall:think:" in text and "Manus selected" in text:
+            # Capture tool selection
             self.thoughts.append(text.strip())
         
     def flush(self):
@@ -317,11 +310,12 @@ async def process_in_background(task_id: str, prompt: str):
             # Start the screenshot capturer task
             screenshot_task = asyncio.create_task(screenshot_capturer())
             
-            # Real-time thought update task
+            # Real-time thought update task with more frequent updates
             async def thought_updater():
                 while task_id in active_tasks and active_tasks[task_id]["status"] == "processing":
+                    # Update thoughts in real-time
                     active_tasks[task_id]["thoughts"] = task_output.get_thoughts()
-                    await asyncio.sleep(0.25)  # Update thoughts more frequently
+                    await asyncio.sleep(0.2)  # Update thoughts even more frequently (200ms)
             
             # Start the thought updater task
             thought_task = asyncio.create_task(thought_updater())

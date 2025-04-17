@@ -61,6 +61,11 @@ body {
 
 .thought-item {
   animation: slideIn 0.3s ease-out;
+  transition: background-color 0.3s ease;
+}
+
+.thought-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 /* Pulse animation for thinking box */

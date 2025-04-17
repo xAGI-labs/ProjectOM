@@ -12,6 +12,7 @@ export default function Home() {
   const [browserScreenshot, setBrowserScreenshot] = useState<string | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastThoughtCountRef = useRef<number>(0);
+  const thoughtsContainerRef = useRef<HTMLDivElement>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,8 +64,22 @@ export default function Home() {
         if (data.thoughts && Array.isArray(data.thoughts)) {
           if (data.thoughts.length > lastThoughtCountRef.current) {
             console.log(`New thoughts: ${data.thoughts.length - lastThoughtCountRef.current}`);
-            setThinking(data.thoughts);
+            
+            const filteredThoughts = data.thoughts.filter(
+              (thought: string) => 
+                thought.includes("✨ Manus's thoughts:") || 
+                thought.includes("🎯 Tool") || 
+                (thought.includes("app.agent.toolcall:think:") && thought.includes("Manus selected"))
+            );
+            
+            setThinking(filteredThoughts);
             lastThoughtCountRef.current = data.thoughts.length;
+            
+            setTimeout(() => {
+              if (thoughtsContainerRef.current) {
+                thoughtsContainerRef.current.scrollTop = thoughtsContainerRef.current.scrollHeight;
+              }
+            }, 100);
           }
         }
         
@@ -112,7 +127,7 @@ export default function Home() {
         setThinking([]);
         setBrowserScreenshot(null);
       }
-    }, 500);
+    }, 300);
     
     pollIntervalRef.current = interval;
     return interval;
@@ -130,20 +145,20 @@ export default function Home() {
     if (thought.includes("✨ Manus's thoughts:")) {
       return thought.split("✨ Manus's thoughts:")[1].trim();
     } else if (thought.includes("🎯 Tool") && thought.includes("completed its mission")) {
-      const resultPart = thought.includes("Result:") ? 
-        thought.split("Result:")[1].trim() : 
-        thought.split("completed its mission!")[1].trim();
-      return `Result: ${resultPart}`;
-    } else if (thought.includes("🧰 Tools being prepared:")) {
-      return `Using tools: ${thought.split("🧰 Tools being prepared:")[1].trim()}`;
-    } else if (thought.includes("🔧 Tool arguments:")) {
-      const args = thought.split("🔧 Tool arguments:")[1].trim();
-      try {
-        const argObj = JSON.parse(args);
-        return `With parameters: ${Object.entries(argObj).map(([k, v]) => `${k}=${v}`).join(", ")}`;
-      } catch {
-        return `With parameters: ${args}`;
+      let result = thought;
+      if (thought.includes("Result:")) {
+        result = thought.split("Result:")[1].trim();
+        if (result.includes("Observed output of cmd")) {
+          result = result.split("Observed output of cmd")[1].trim();
+          result = result.replace(/`([^`]+)`/, '$1').trim();
+          result = result.replace(/executed:/, '').trim();
+        }
       }
+      return `Result: ${result}`;
+    } else if (thought.includes("app.agent.toolcall:think:") && thought.includes("Manus selected")) {
+      const match = thought.match(/Manus selected \d+ tools? to use/);
+      if (match) return match[0];
+      return "Selected tools for next action";
     }
     return thought;
   };
@@ -151,8 +166,7 @@ export default function Home() {
   const isMainThought = (thought: string) => {
     return thought.includes("✨ Manus's thoughts:") || 
            thought.includes("🎯 Tool") || 
-           thought.includes("🧰 Tools being prepared:") ||
-           thought.includes("🔧 Tool arguments:");
+           (thought.includes("app.agent.toolcall:think:") && thought.includes("Manus selected"));
   };
 
   return (
@@ -214,13 +228,16 @@ export default function Home() {
 
               {loading && (
                 <div className="flex-1 overflow-y-auto">
-                  {thinking.filter(isMainThought).length > 0 ? (
+                  {thinking.length > 0 ? (
                     <div className="p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900 mr-auto max-w-[90%]">
                       <p className="text-sm font-medium mb-2 flex items-center">
                         <span>Manus is thinking</span>
                         <span className="ml-1 thinking">...</span>
                       </p>
-                      <div className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap max-h-80 overflow-y-auto">
+                      <div 
+                        ref={thoughtsContainerRef}
+                        className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap max-h-80 overflow-y-auto"
+                      >
                         {thinking.filter(isMainThought).map((thought, idx) => (
                           <div key={idx} className="mb-2 p-2 border-b border-yellow-200 dark:border-yellow-800 last:border-0 thought-item">
                             <p className="text-sm">{formatThought(thought)}</p>
