@@ -1,0 +1,49 @@
+generator client {
+    provider = "prisma-client-js"
+    output   = "../lib/generated/prisma"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+enum Role {
+    USER
+    ASSISTANT
+}
+
+model User {
+    id        String    @id @default(cuid())
+    name      String
+    email     String    @unique
+    avatar    String?
+    createdAt DateTime  @default(now())
+    updatedAt DateTime  @updatedAt
+    // spaces    Space[]
+    // messages  Message[]
+}
+
+model Space {
+    id            String    @id @default(cuid())
+    title         String
+    initialPrompt String
+    createdAt     DateTime  @default(now())
+    updatedAt     DateTime  @updatedAt
+    saved         Boolean   @default(false)
+    // userId        String
+    // user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+    messages      Message[]
+}
+
+model Message {
+    id        String   @id @default(cuid())
+    content   String   @db.Text
+    role      Role     @default(USER)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+    spaceId   String
+    space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+    // userId    String
+    // user      User     @relation(fields: [userId], references: [id])
+}

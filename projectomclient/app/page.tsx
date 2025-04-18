@@ -1,283 +1,199 @@
-"use client";
+"use client"
 
-import { useState, useEffect, useRef } from "react";
-import Image from "next/image";
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { Search } from "lucide-react"
+import Image from "next/image"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardFooter } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
+import { createSpace } from "@/actions/chat.action"
+import { toast } from "sonner"
 
 export default function Home() {
-	const [prompt, setPrompt] = useState("");
-	const [messages, setMessages] = useState<Array<{ type: string; content: string }>>([]);
-	const [loading, setLoading] = useState(false);
-	const [taskId, setTaskId] = useState<string | null>(null);
-	const [thinking, setThinking] = useState<string[]>([]);
-	const [browserScreenshot, setBrowserScreenshot] = useState<string | null>(null);
-	const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-	const lastThoughtCountRef = useRef<number>(0);
-	const thoughtsContainerRef = useRef<HTMLDivElement>(null);
+	const [inputValue, setInputValue] = useState("");
+	const router = useRouter();
+	const [isSubmitting, setIsSubmitting] = useState(false);
 
-	const handleSubmit = async (e: React.FormEvent) => {
-		e.preventDefault();
-		if (!prompt.trim()) return;
-
-		const userMessage = { type: "user", content: prompt };
-		setMessages((prev) => [...prev, userMessage]);
-
-		setLoading(true);
-		setThinking([]);
-		lastThoughtCountRef.current = 0;
-
-		try {
-			const response = await fetch('/api/prompt', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ prompt }),
-			});
-
-			const data = await response.json();
-
-			if (data.status === 'success') {
-				setTaskId(data.message.split(':')[1].trim());
-				if (pollIntervalRef.current) {
-					clearInterval(pollIntervalRef.current);
-				}
-				pollForResults(data.message.split(':')[1].trim());
-			} else {
-				setMessages((prev) => [...prev, { type: "system", content: `Error: ${data.message}` }]);
-				setLoading(false);
-			}
-		} catch (error) {
-			console.error('Error submitting prompt:', error);
-			setMessages((prev) => [...prev, { type: "system", content: "Failed to connect to the server." }]);
-			setLoading(false);
-		}
-
-		setPrompt("");
-	};
-
-	const pollForResults = (taskId: string) => {
-		const interval = setInterval(async () => {
+	const handleSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
+		e.preventDefault()
+		if (inputValue.trim()) {
 			try {
-				const response = await fetch(`/api/tasks/${taskId}`);
-				const data = await response.json();
+				setIsSubmitting(true)
 
-				console.log("Poll response:", data);
+				localStorage.setItem("projectom_prompt", inputValue)
 
-				if (data.thoughts && Array.isArray(data.thoughts)) {
-					if (data.thoughts.length > lastThoughtCountRef.current) {
-						console.log(`New thoughts: ${data.thoughts.length - lastThoughtCountRef.current}`);
+				const result = await createSpace({ prompt: inputValue })
 
-						const filteredThoughts = data.thoughts.filter(
-							(thought: string) =>
-								thought.includes("✨ Manus's thoughts:") ||
-								thought.includes("🎯 Tool") ||
-								(thought.includes("app.agent.toolcall:think:") && thought.includes("Manus selected"))
-						);
-
-						setThinking(filteredThoughts);
-						lastThoughtCountRef.current = data.thoughts.length;
-
-						setTimeout(() => {
-							if (thoughtsContainerRef.current) {
-								thoughtsContainerRef.current.scrollTop = thoughtsContainerRef.current.scrollHeight;
-							}
-						}, 100);
-					}
+				if (!result.success) {
+					throw new Error(result.error || 'Failed to create space')
 				}
 
-				if (data.browser_screenshot) {
-					setBrowserScreenshot(data.browser_screenshot);
-				}
-
-				if (data.status === 'success' && data.results) {
-					clearInterval(interval);
-					pollIntervalRef.current = null;
-
-					const finalThought = data.thoughts.find((t: string) =>
-						t.includes("✨ Manus's thoughts:") &&
-						(t.includes("I now have the answer") || t.includes("current president of Nepal"))
-					);
-
-					const finalAnswer = finalThought ?
-						finalThought.split("✨ Manus's thoughts:")[1].trim() :
-						data.results;
-
-					setMessages((prev) => [...prev, { type: "assistant", content: finalAnswer }]);
-					setLoading(false);
-					setTaskId(null);
-
-					setTimeout(() => {
-						setThinking([]);
-						setBrowserScreenshot(null);
-					}, 2000);
-				} else if (data.status === 'error') {
-					clearInterval(interval);
-					pollIntervalRef.current = null;
-					setMessages((prev) => [...prev, { type: "system", content: `Error: ${data.message}` }]);
-					setLoading(false);
-					setTaskId(null);
-					setThinking([]);
-					setBrowserScreenshot(null);
-				}
+				router.push(`/space/${result.spaceId}`)
 			} catch (error) {
-				console.error('Error polling for results:', error);
-				clearInterval(interval);
-				pollIntervalRef.current = null;
-				setMessages((prev) => [...prev, { type: "system", content: "Failed to retrieve results." }]);
-				setLoading(false);
-				setTaskId(null);
-				setThinking([]);
-				setBrowserScreenshot(null);
+				console.error('Error creating space:', error)
+				toast("Error", {
+					description: "Failed to create space. Please try again.",
+				})
+			} finally {
+				setIsSubmitting(false)
 			}
-		}, 300);
-
-		pollIntervalRef.current = interval;
-		return interval;
-	};
-
-	useEffect(() => {
-		return () => {
-			if (pollIntervalRef.current) {
-				clearInterval(pollIntervalRef.current);
-			}
-		};
-	}, []);
-
-	const formatThought = (thought: string) => {
-		if (thought.includes("✨ Manus's thoughts:")) {
-			return thought.split("✨ Manus's thoughts:")[1].trim();
-		} else if (thought.includes("🎯 Tool") && thought.includes("completed its mission")) {
-			let result = thought;
-			if (thought.includes("Result:")) {
-				result = thought.split("Result:")[1].trim();
-				if (result.includes("Observed output of cmd")) {
-					result = result.split("Observed output of cmd")[1].trim();
-					result = result.replace(/`([^`]+)`/, '$1').trim();
-					result = result.replace(/executed:/, '').trim();
-				}
-			}
-			return `Result: ${result}`;
-		} else if (thought.includes("app.agent.toolcall:think:") && thought.includes("Manus selected")) {
-			const match = thought.match(/Manus selected \d+ tools? to use/);
-			if (match) return match[0];
-			return "Selected tools for next action";
 		}
-		return thought;
-	};
-
-	const isMainThought = (thought: string) => {
-		return thought.includes("✨ Manus's thoughts:") ||
-			thought.includes("🎯 Tool") ||
-			(thought.includes("app.agent.toolcall:think:") && thought.includes("Manus selected"));
-	};
+	}
 
 	return (
-		<div className="flex flex-col min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
-			<header className="flex items-center justify-center py-4 border-b dark:border-gray-700">
-				<h1 className="text-2xl font-bold text-gray-900 dark:text-white">ProjectOM</h1>
-			</header>
-
-			<main className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
-				<div className="flex-1 overflow-y-auto p-4 space-y-4">
-					{messages.length === 0 && thinking.length === 0 && !browserScreenshot ? (
-						<div className="flex flex-col items-center justify-center h-full">
-							<Image
-								src="/manus-logo.svg"
-								alt="Manus Logo"
-								width={120}
-								height={120}
-								className="mb-4 opacity-50"
-								priority
-							/>
-							<h2 className="text-xl text-gray-500 dark:text-gray-400">
-								Hello! What can I do for you today?
-							</h2>
+		<div className="flex h-screen bg-[#121212] text-white">
+			<main className="flex-1 overflow-auto">
+				<div className="max-w-5xl mx-auto px-4 py-8">
+					<div className="flex flex-col items-center justify-center text-center mb-8 mt-12">
+						<h1 className="text-2xl font-medium mb-2">Hello Niraj Jha</h1>
+						<p className="text-gray-400 mb-6">What can I do for you?</p>
+						<form onSubmit={handleSubmit} className="w-full max-w-xl">
+							<div className="relative">
+								<Input
+									className="bg-[#1e1e1e] border-none h-14 pl-12 pr-12 rounded-lg text-white placeholder:text-gray-500"
+									placeholder="Give ProjectOM a task to work on..."
+									value={inputValue}
+									onChange={(e) => setInputValue(e.target.value)}
+								/>
+								<div className="absolute left-4 top-1/2 -translate-y-1/2">
+									<Search className="h-5 w-5 text-gray-500" />
+								</div>
+								<div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+									<Badge variant="outline" className="text-xs bg-transparent border-gray-700 text-gray-400">
+										Standard
+									</Badge>
+									<span className="text-xs text-gray-500">1/3K</span>
+								</div>
+							</div>
+						</form>
+						<div className="w-full max-w-xl mt-3 bg-[#1e1e1e] rounded-lg p-3 flex justify-between items-center">
+							<p className="text-sm text-gray-400">
+								ProjectOM needs certain permissions at task startup and may misbehave.
+							</p>
+							<div className="flex gap-2">
+								<Button variant="ghost" size="sm" className="text-gray-400 h-8">
+									Decline
+								</Button>
+								<Button size="sm" className="bg-blue-600 hover:bg-blue-700 h-8">
+									Accept
+								</Button>
+							</div>
 						</div>
-					) : (
-						<>
-							{messages.map((message, index) => (
-								<div
-									key={index}
-									className={`p-4 rounded-lg ${message.type === "user"
-											? "bg-blue-100 dark:bg-blue-900 ml-auto max-w-[80%]"
-											: message.type === "assistant"
-												? "bg-gray-100 dark:bg-gray-800 mr-auto max-w-[80%]"
-												: "bg-red-100 dark:bg-red-900 mx-auto max-w-[90%]"
-										}`}
-								>
-									<p className="text-sm font-medium mb-1">
-										{message.type === "user" ? "You" : message.type === "assistant" ? "Manus" : "System"}
-									</p>
-									<div className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
-										{message.content}
-									</div>
-								</div>
-							))}
-
-							{browserScreenshot && (
-								<div className="p-4 rounded-lg bg-white dark:bg-gray-800 mx-auto w-full max-w-3xl shadow-md browser-preview">
-									<p className="text-sm font-medium mb-2 text-center">Browser View</p>
-									<div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
-										<img
-											src={`data:image/jpeg;base64,${browserScreenshot}`}
-											alt="Browser View"
-											className="absolute top-0 left-0 w-full h-full object-contain rounded-md"
-										/>
-									</div>
-								</div>
-							)}
-
-							{loading && (
-								<div className="flex-1 overflow-y-auto">
-									{thinking.length > 0 ? (
-										<div className="p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900 mr-auto max-w-[90%]">
-											<p className="text-sm font-medium mb-2 flex items-center">
-												<span>Manus is thinking</span>
-												<span className="ml-1 thinking">...</span>
-											</p>
-											<div
-												ref={thoughtsContainerRef}
-												className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap max-h-80 overflow-y-auto"
-											>
-												{thinking.filter(isMainThought).map((thought, idx) => (
-													<div key={idx} className="mb-2 p-2 border-b border-yellow-200 dark:border-yellow-800 last:border-0 thought-item">
-														<p className="text-sm">{formatThought(thought)}</p>
-													</div>
-												))}
-											</div>
-										</div>
-									) : (
-										<div className="flex items-center justify-center p-4">
-											<div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900 dark:border-white"></div>
-											<p className="ml-2 text-gray-600 dark:text-gray-300">
-												{taskId ? "Processing your request..." : "Sending..."}
-											</p>
-										</div>
-									)}
-								</div>
-							)}
-						</>
-					)}
-				</div>
-
-				<form onSubmit={handleSubmit} className="border-t p-4 dark:border-gray-700">
-					<div className="flex items-center space-x-2">
-						<input
-							type="text"
-							value={prompt}
-							onChange={(e) => setPrompt(e.target.value)}
-							placeholder="Give Manus a task to work on..."
-							className="flex-1 p-2 border dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-							disabled={loading}
-						/>
-						<button
-							type="submit"
-							disabled={loading || !prompt.trim()}
-							className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-						>
-							Send
-						</button>
 					</div>
-				</form>
+					<div className="mb-8">
+						<div className="flex flex-wrap gap-2 justify-center mb-6">
+							<Badge className="bg-white/10 hover:bg-white/20 text-white rounded-full px-4 py-1">Recommended</Badge>
+							<Badge variant="outline" className="text-gray-400 rounded-full px-4 py-1">
+								Featured
+							</Badge>
+							<Badge variant="outline" className="text-gray-400 rounded-full px-4 py-1">
+								Life
+							</Badge>
+							<Badge variant="outline" className="text-gray-400 rounded-full px-4 py-1">
+								Research
+							</Badge>
+							<Badge variant="outline" className="text-gray-400 rounded-full px-4 py-1">
+								Education
+							</Badge>
+							<Badge variant="outline" className="text-gray-400 rounded-full px-4 py-1">
+								Data Analysis
+							</Badge>
+							<Badge variant="outline" className="text-gray-400 rounded-full px-4 py-1">
+								Productivity
+							</Badge>
+							<Badge variant="outline" className="text-gray-400 rounded-full px-4 py-1">
+								Content Creator
+							</Badge>
+						</div>
+						<p className="text-xs text-gray-500 text-center mb-8">
+							All tasks and capabilities shown in the community are exclusively shared by users. The features does not
+							display any content without your consent.
+						</p>
+						<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+							{
+								templates.map((template, index) => (
+									<Card key={index} className="bg-[#1e1e1e] border-none overflow-hidden">
+										<CardContent className="p-0">
+											<div className="relative h-40 w-full">
+												<Image
+													src={template.image || "/placeholder.svg"}
+													alt={template.title}
+													fill
+													className="object-cover"
+												/>
+												{
+													template.quote && (
+														<div className="absolute inset-0 bg-black/60 flex items-center p-4">
+															<blockquote className="text-sm text-white">{template.quote}</blockquote>
+														</div>
+													)
+												}
+											</div>
+										</CardContent>
+										<CardFooter className="flex flex-col items-start p-4">
+											<h3 className="text-sm font-medium mb-1">{template.title}</h3>
+											<p className="text-xs text-gray-400">{template.author}</p>
+										</CardFooter>
+									</Card>
+								))
+							}
+						</div>
+					</div>
+				</div>
 			</main>
 		</div>
-	);
+	)
 }
+
+const templates = [
+	{
+		title: "Cybersecurity Learning Roadmap",
+		author: "Aleksandar N. Hristov",
+		image: "/placeholder.svg?height=400&width=600",
+		quote:
+			"Design an interactive webpage that explains the worldviews of the greatest philosophers in MIST with clear visuals...",
+	},
+	{
+		title: "Innovative RUST Learning Webpage",
+		author: "RUST",
+		image: "/placeholder.svg?height=400&width=600",
+	},
+	{
+		title: "MPC Style Dune Machine",
+		author: "Cosmic Samurai",
+		image: "/placeholder.svg?height=400&width=600",
+		quote:
+			"Come up with a concept for a synth sequencer and create a layout for it with a logo and a cool aesthetic. Then create a website with a...",
+	},
+	{
+		title: "Digital Mobility Solutions Leaks PLC Malaysian Project",
+		author: "Executive Business",
+		image: "/placeholder.svg?height=400&width=600",
+	},
+	{
+		title: "Successful AI Agent PDF Site",
+		author: "SUCCESSFUL AGENT",
+		image: "/placeholder.svg?height=400&width=600",
+		quote:
+			"Create a website similar to https://blog.adept.ai/greymatter, but for AI Agent products that have successfully achieved PMF (Product-...",
+	},
+	{
+		title: "Savanna Through Gate: A Kansas Farm Site Amidst in the Heavens",
+		author: "SAVANNA THROUGH GATE",
+		image: "/placeholder.svg?height=400&width=600",
+	},
+	{
+		title: "Android APK for To-Do List with Get Icon",
+		author: "NEXT GEN LAUNCHER",
+		image: "/placeholder.svg?height=400&width=600",
+		quote:
+			"Build an android apk for todolist UI and forms, so that apk show in main page todolist with notification natural go, if user clicks the...",
+	},
+	{
+		title: "Near-Term Quantum Computing and Related Technologies",
+		author: "Quantum",
+		image: "/placeholder.svg?height=400&width=600",
+	},
+]

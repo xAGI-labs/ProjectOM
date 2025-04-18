@@ -1,64 +1,106 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
-import Link from "next/link"
-import { PanelLeft, Clock, Bookmark, Settings, HelpCircle, ChevronRight } from "lucide-react"
-import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
+import { PanelLeft, Clock, Bookmark, Settings, HelpCircle, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { formatDistanceToNow } from "date-fns";
+import { getRecentSpaces, Space } from "@/actions/chat.action";
 
-export function Sidebar() {
-    const [isOpen, setIsOpen] = useState(true)
-    const router = useRouter()
+interface SidebarProps {
+    isOpen: boolean;
+    setIsOpen: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
+    console.log("isOpen:", isOpen);
+    console.log("setIsOpen type:", typeof setIsOpen);
+    const [recentSpaces, setRecentSpaces] = useState<Space[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const router = useRouter();
+    const pathname = usePathname();
 
     useEffect(() => {
-        const handleResize = () => {
-            if (window.innerWidth <= 768) {
-                setIsOpen(false)
-            } else {
-                setIsOpen(true)
+        async function fetchRecentSpaces() {
+            try {
+                setIsLoading(true);
+                const result = await getRecentSpaces();
+                if (result.success) {
+                    setRecentSpaces(result.spaces);
+                } else {
+                    console.error("Error fetching recent spaces:", result.error);
+                }
+            } catch (error) {
+                console.error("Error fetching recent spaces:", error);
+            } finally {
+                setIsLoading(false);
             }
         }
 
-        handleResize()
+        fetchRecentSpaces();
+    }, []);
 
-        window.addEventListener("resize", handleResize)
-        return () => window.removeEventListener("resize", handleResize)
-    }, [])
+    const toggleSidebar = () => {
+        setIsOpen((prev: boolean) => !prev);
+    };
+
+    const handleNavigation = () => {
+        if (typeof window !== "undefined" && window.innerWidth <= 768) {
+            setIsOpen(false);
+        }
+    };
 
     return (
         <>
-            {isOpen && <div className="fixed inset-0 bg-black/80 z-40 md:hidden" onClick={() => setIsOpen(false)} />}
-            <Button
-                variant="ghost"
-                size="icon"
-                className="fixed top-4 left-4 z-50 md:hidden text-white"
-                onClick={() => setIsOpen(!isOpen)}
-            >
-                <PanelLeft className="h-5 w-5" />
-            </Button>
+            {
+                isOpen && (
+                    <div
+                        className="fixed inset-0 bg-black/50 z-40 md:hidden"
+                        onClick={toggleSidebar}
+                    />
+                )
+            }
+            {
+                !isOpen && (
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="fixed top-4 left-4 z-50 text-white bg-[#0a0a0a]/80 hover:bg-[#222] md:text-gray-400 md:hover:text-white"
+                        onClick={toggleSidebar}
+                    >
+                        <PanelLeft className="h-5 w-5" />
+                    </Button>
+                )
+            }
             <aside
                 className={cn(
-                    "fixed inset-y-0 left-0 z-40 w-64 bg-[#0a0a0a] border-r border-[#222] transition-transform duration-300 md:translate-x-0",
-                    isOpen ? "translate-x-0" : "-translate-x-full",
+                    "fixed top-0 left-0 h-screen z-50 bg-[#0a0a0a] border-r border-[#222] transition-all duration-300 ease-in-out",
+                    isOpen ? "w-64 translate-x-0" : "w-0 -translate-x-full"
                 )}
             >
-                <div className="flex flex-col h-full">
-                    <div className="p-4 border-b border-[#222]">
-                        <Link href="/" className="flex items-center gap-2">
-                            <div className="bg-white rounded-full p-1">
-                                <div className="bg-black rounded-full w-5 h-5 flex items-center justify-center">
-                                    <span className="text-white text-xs font-bold">p</span>
-                                </div>
-                            </div>
-                            <span className="font-medium">ProjectOM</span>
+                <div className={cn("flex flex-col h-full", isOpen ? "visible" : "hidden")}>
+                    <div className="p-4 border-b border-[#222] flex items-center justify-between">
+                        <Link href="/" className="flex items-center gap-2" onClick={handleNavigation}>
+                            <span className="font-medium text-white">ProjectOM</span>
                         </Link>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-gray-400 hover:text-white"
+                            onClick={toggleSidebar}
+                        >
+                            <PanelLeft className="h-5 w-5" />
+                        </Button>
                     </div>
                     <nav className="flex-1 overflow-y-auto py-4">
                         <div className="px-3 mb-4">
-                            <Link href="/landingpage">
-                                <div className="text-xs font-medium text-gray-500 px-3 mb-2">New task</div>
+                            <Link href="/" onClick={handleNavigation}>
+                                <div className="text-xs font-medium text-gray-500 px-3 mb-2">
+                                    New task
+                                </div>
                                 <Button
                                     variant="ghost"
                                     className="w-full justify-start text-gray-400 hover:text-white hover:bg-[#222] mb-2"
@@ -73,28 +115,77 @@ export function Sidebar() {
                             </Link>
                         </div>
                         <div className="space-y-1 px-3 mb-6">
-                            <NavItem icon={<PanelLeft size={16} />} label="Home" active />
-                            <NavItem icon={<Clock size={16} />} label="History" />
-                            <NavItem icon={<Bookmark size={16} />} label="Saved" />
+                            <NavItem
+                                icon={<PanelLeft size={16} />}
+                                label="Home"
+                                link="/"
+                                isActive={pathname === '/'}
+                                onNavigate={handleNavigation}
+                            />
+                            <NavItem
+                                icon={<Clock size={16} />}
+                                label="History"
+                                link="/history"
+                                isActive={pathname === '/history'}
+                                onNavigate={handleNavigation}
+                            />
+                            <NavItem
+                                icon={<Bookmark size={16} />}
+                                label="Saved"
+                                link="/savedspace"
+                                isActive={pathname === '/savedspace'}
+                                onNavigate={handleNavigation}
+                            />
                         </div>
                         <div className="px-3">
-                            <div className="text-xs font-medium text-gray-500 px-3 mb-2">Recent</div>
+                            <div className="text-xs font-medium text-gray-500 px-3 mb-2">
+                                Recent
+                            </div>
                             <div className="space-y-1">
-                                <ChatItem
-                                    label="Tour and Travel Websites in Nepal"
-                                    description="I'm preparing for research on Nepal tour and travel..."
-                                    time="17 hours ago"
-                                    onClick={() => router.push("/space/nepal-travel-123")}
-                                />
+                                {
+                                    isLoading ? (
+                                        <div className="text-xs text-gray-500 px-3">
+                                            Loading spaces...
+                                        </div>
+                                    ) : recentSpaces.length > 0 ? (
+                                        recentSpaces.map((space) => (
+                                            <ChatItem
+                                                key={space.id}
+                                                label={space.title}
+                                                description={space.initialPrompt}
+                                                time={formatDistanceToNow(new Date(space.createdAt), {
+                                                    addSuffix: true,
+                                                })}
+                                                isActive={pathname === `/space/${space.id}`}
+                                                onClick={() => {
+                                                    router.push(`/space/${space.id}`);
+                                                    handleNavigation();
+                                                }}
+                                            />
+                                        ))
+                                    ) : (
+                                        <div className="text-xs text-gray-500 px-3">
+                                            No recent spaces
+                                        </div>
+                                    )
+                                }
                             </div>
                         </div>
                     </nav>
                     <div className="p-4 border-t border-[#222]">
                         <div className="flex items-center justify-between mb-4">
-                            <Button variant="ghost" size="icon" className="text-gray-400 hover:text-white">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-gray-400 hover:text-white"
+                            >
                                 <Settings size={16} />
                             </Button>
-                            <Button variant="ghost" size="icon" className="text-gray-400 hover:text-white">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-gray-400 hover:text-white"
+                            >
                                 <HelpCircle size={16} />
                             </Button>
                         </div>
@@ -104,9 +195,15 @@ export function Sidebar() {
                                 <AvatarFallback>NJ</AvatarFallback>
                             </Avatar>
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium truncate">Niraj Jha</p>
+                                <p className="text-sm font-medium text-white truncate">
+                                    Niraj Jha
+                                </p>
                             </div>
-                            <Button variant="ghost" size="icon" className="text-gray-400 hover:text-white">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-gray-400 hover:text-white"
+                            >
                                 <ChevronRight size={16} />
                             </Button>
                         </div>
@@ -114,47 +211,76 @@ export function Sidebar() {
                 </div>
             </aside>
         </>
-    )
+    );
 }
 
-function NavItem({ icon, label, active = false }: { icon: React.ReactNode; label: string; active?: boolean }) {
+function NavItem({
+    icon,
+    label,
+    isActive = false,
+    link,
+    onNavigate
+}: {
+    icon: React.ReactNode;
+    label: string;
+    isActive?: boolean;
+    link: string;
+    onNavigate: () => void;
+}) {
     return (
-        <Button
-            variant="ghost"
-            className={cn(
-                "w-full justify-start",
-                active ? "bg-[#222] text-white" : "text-gray-400 hover:text-white hover:bg-[#222]",
-            )}
-        >
-            <span className="flex items-center gap-2">
-                {icon}
-                <span>{label}</span>
-            </span>
-        </Button>
-    )
+        <Link href={`${link}`}>
+            <Button
+                variant="ghost"
+                className={cn(
+                    "w-full justify-start",
+                    isActive
+                        ? "bg-[#222] text-white"
+                        : "text-gray-400 hover:text-white hover:bg-[#222]"
+                )}
+                onClick={onNavigate}
+            >
+                <span className="flex items-center gap-2">
+                    {icon}
+                    <span>{label}</span>
+                </span>
+            </Button>
+        </Link>
+    );
 }
 
 function ChatItem({
     label,
     description,
     time,
+    isActive = false,
     onClick,
 }: {
-    label: string
-    description: string
-    time: string
-    onClick: () => void
+    label: string;
+    description: string;
+    time: string;
+    isActive?: boolean;
+    onClick: () => void;
 }) {
     return (
-        <button onClick={onClick} className="w-full text-left p-3 rounded-lg transition-colors hover:bg-[#222] group">
+        <button
+            onClick={onClick}
+            className={cn(
+                "w-full text-left p-3 rounded-lg transition-colors hover:bg-[#222] group",
+                isActive ? "bg-[#222]" : ""
+            )}
+        >
             <div className="flex flex-col gap-1">
-                <h3 className="text-sm font-medium text-gray-300 group-hover:text-white truncate">{label}</h3>
+                <h3 className="text-sm font-medium text-gray-300 group-hover:text-white truncate">
+                    {label}
+                </h3>
                 <p className="text-xs text-gray-500 line-clamp-2">{description}</p>
                 <div className="flex items-center justify-between mt-1">
                     <span className="text-xs text-gray-600">{time}</span>
-                    <span className="text-xs text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity">View →</span>
+                    <span className="text-xs text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                        View →
+                    </span>
                 </div>
             </div>
         </button>
-    )
+    );
 }

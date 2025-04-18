@@ -8,27 +8,43 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Sidebar } from "@/components/sidebar"
+import { createSpace } from "@/actions/chat.action"
+import { toast } from "sonner"
 
 export default function Home() {
-    const [inputValue, setInputValue] = useState("")
-    const router = useRouter()
+    const [inputValue, setInputValue] = useState("");
+    const router = useRouter();
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const handleSubmit = (e: React.FormEvent<HTMLFormElement>): void => {
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
         e.preventDefault()
         if (inputValue.trim()) {
-            localStorage.setItem("projectom_prompt", inputValue)
+            try {
+                setIsSubmitting(true)
 
-            // Generate a random chat ID
-            const chatId: string = Math.random().toString(36).substring(2, 15)
-            router.push(`/space/${chatId}`)
+                localStorage.setItem("projectom_prompt", inputValue)
+
+                const result = await createSpace({ prompt: inputValue })
+
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to create space')
+                }
+
+                router.push(`/space/${result.spaceId}`)
+            } catch (error) {
+                console.error('Error creating space:', error)
+                toast("Error", {
+                    description: "Failed to create space. Please try again.",
+                })
+            } finally {
+                setIsSubmitting(false)
+            }
         }
     }
 
     return (
         <div className="flex h-screen bg-[#121212] text-white">
-            <Sidebar />
-            <main className="flex-1 overflow-auto md:ml-64">
+            <main className="flex-1 overflow-auto">
                 <div className="max-w-5xl mx-auto px-4 py-8">
                     <div className="flex flex-col items-center justify-center text-center mb-8 mt-12">
                         <h1 className="text-2xl font-medium mb-2">Hello Niraj Jha</h1>
@@ -97,31 +113,31 @@ export default function Home() {
                         </p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                             {
-                            templates.map((template, index) => (
-                                <Card key={index} className="bg-[#1e1e1e] border-none overflow-hidden">
-                                    <CardContent className="p-0">
-                                        <div className="relative h-40 w-full">
-                                            <Image
-                                                src={template.image || "/placeholder.svg"}
-                                                alt={template.title}
-                                                fill
-                                                className="object-cover"
-                                            />
-                                            {
-                                            template.quote && (
-                                                <div className="absolute inset-0 bg-black/60 flex items-center p-4">
-                                                    <blockquote className="text-sm text-white">{template.quote}</blockquote>
-                                                </div>
-                                            )
-                                            }
-                                        </div>
-                                    </CardContent>
-                                    <CardFooter className="flex flex-col items-start p-4">
-                                        <h3 className="text-sm font-medium mb-1">{template.title}</h3>
-                                        <p className="text-xs text-gray-400">{template.author}</p>
-                                    </CardFooter>
-                                </Card>
-                            ))
+                                templates.map((template, index) => (
+                                    <Card key={index} className="bg-[#1e1e1e] border-none overflow-hidden">
+                                        <CardContent className="p-0">
+                                            <div className="relative h-40 w-full">
+                                                <Image
+                                                    src={template.image || "/placeholder.svg"}
+                                                    alt={template.title}
+                                                    fill
+                                                    className="object-cover"
+                                                />
+                                                {
+                                                    template.quote && (
+                                                        <div className="absolute inset-0 bg-black/60 flex items-center p-4">
+                                                            <blockquote className="text-sm text-white">{template.quote}</blockquote>
+                                                        </div>
+                                                    )
+                                                }
+                                            </div>
+                                        </CardContent>
+                                        <CardFooter className="flex flex-col items-start p-4">
+                                            <h3 className="text-sm font-medium mb-1">{template.title}</h3>
+                                            <p className="text-xs text-gray-400">{template.author}</p>
+                                        </CardFooter>
+                                    </Card>
+                                ))
                             }
                         </div>
                     </div>
