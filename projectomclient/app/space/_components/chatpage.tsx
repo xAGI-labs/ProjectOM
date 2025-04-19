@@ -2,12 +2,19 @@
 
 import type React from "react"
 import { useState, useEffect, useRef } from "react"
-import { ArrowUp, Paperclip, User, Ellipsis, Star, Pencil } from "lucide-react"
+import { ArrowUp, Paperclip, User, MoreHorizontal, Star, Pencil, Bot } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Textarea } from "@/components/ui/textarea"
-import { sendMessage, getSpaceMessages, sendInitialAssistantMessage } from "@/actions/chat.action"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { getSpaceMessages, sendMessage, fetchSpaceById, addAsFavourites, updateSpaceTitle } from "@/actions/chat.action"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { useUser } from "@clerk/nextjs"
+import ThinkingAnimation from "./thinkinganimation"
+import { motion, AnimatePresence } from "framer-motion"
+import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 type Message = {
     id?: string
@@ -16,112 +23,82 @@ type Message = {
     timestamp: string
     role?: "USER" | "ASSISTANT"
 }
-type Space = {
-    id: string
-    saved: boolean
-}
+
 export default function ChatPage({ chatId }: { chatId: string }) {
-    const [inputValue, setInputValue] = useState("");
-    const [messages, setMessages] = useState<Message[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [isInitialLoad, setIsInitialLoad] = useState(true);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
-    const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const [inputValue, setInputValue] = useState("")
+    const [messages, setMessages] = useState<Message[]>([])
+    const [title, setTitle] = useState<string | null>(null)
+    const [isFavourite, setIsFavourite] = useState<boolean>(false);
+    const [messageLoading, setMessageLoading] = useState(false)
+    const [pageLoading, setPageLoading] = useState(true)
+    const [isEditingTitle, setIsEditingTitle] = useState(false)
+    const [newTitle, setNewTitle] = useState("")
+    const [isRenaming, setIsRenaming] = useState(false)
+    const messagesEndRef = useRef<HTMLDivElement>(null)
+    const { user } = useUser()
+    const initializedRef = useRef(false)
 
+    // Split initialization into two separate effects to prevent race conditions
+    // First effect - Fetch space data and existing messages
     useEffect(() => {
-        const savedPrompt = localStorage.getItem("projectom_prompt")
-
-        if (savedPrompt) {
-            const currentTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-            setMessages((prev) => [
-                ...prev,
-                {
-                    type: "user",
-                    content: savedPrompt,
-                    timestamp: currentTime,
-                },
-            ])
-
-            if (chatId) {
-                handleUserMessage(savedPrompt, false)
-                localStorage.removeItem("projectom_prompt")
-            }
-        }
-    }, [chatId])
-
-    useEffect(() => {
-        const fetchMessages = async () => {
-            if (!chatId) return
+        const fetchInitialData = async () => {
+            if (!chatId || initializedRef.current) return
 
             try {
-                if (messages.length > 0 && messages.some((msg) => msg.type === "user" && !msg.id)) {
-                    return
-                }
+                const spaceResponse = await fetchSpaceById(chatId)
+                if (spaceResponse.success && spaceResponse.space) {
+                    setTitle(spaceResponse.space.title)
+                    setNewTitle(spaceResponse.space.title)
+                    setIsFavourite(spaceResponse.space.saved);
 
-                const response = await getSpaceMessages(chatId as string)
+                    const response = await getSpaceMessages(chatId)
 
-                if (response.success && response.messages) {
-                    interface RawMessage {
-                        id: string
-                        role: "USER" | "ASSISTANT"
-                        content: string
-                        createdAt: string
-                    }
-
-                    const formattedMessages: Message[] = response.messages.map((msg: RawMessage) => ({
-                        id: msg.id,
-                        type: msg.role.toLowerCase() as "user" | "assistant",
-                        content: msg.content,
-                        timestamp: new Date(msg.createdAt).toLocaleTimeString([], {
+                    if (response.messages && response.messages.length > 0) {
+                        const formattedMessages = response.messages.map(
+                            (msg: {
+                                id: string
+                                role: "USER" | "ASSISTANT"
+                                content: string
+                                createdAt: Date
+                            }) => ({
+                                id: msg.id,
+                                type: msg.role.toLowerCase() as "user" | "assistant",
+                                content: msg.content,
+                                timestamp: new Date(msg.createdAt).toLocaleTimeString([], {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                }),
+                                role: msg.role,
+                            }),
+                        )
+                        setMessages(formattedMessages)
+                        initializedRef.current = true
+                        setPageLoading(false)
+                    } else if (spaceResponse.space.initialPrompt) {
+                        const currentTime = new Date().toLocaleTimeString([], {
                             hour: "2-digit",
                             minute: "2-digit",
-                        }),
-                        role: msg.role,
-                    }))
+                        })
 
-                    setMessages(formattedMessages)
+                        setMessages([{
+                            type: "user",
+                            content: spaceResponse.space.initialPrompt,
+                            timestamp: currentTime,
+                            role: "USER"
+                        }])
+                        setPageLoading(false);
 
-                    if (formattedMessages.length === 0) {
-                        await sendInitialAssistantMessage(chatId as string)
-
-                        const updatedResponse = await getSpaceMessages(chatId as string)
-                        if (updatedResponse.success && updatedResponse.messages) {
-                            const updatedMessages = updatedResponse.messages.map(
-                                (msg: {
-                                    id: string
-                                    role: "USER" | "ASSISTANT"
-                                    content: string
-                                    createdAt: string
-                                }): Message => ({
-                                    id: msg.id,
-                                    type: msg.role.toLowerCase() as "user" | "assistant",
-                                    content: msg.content,
-                                    timestamp: new Date(msg.createdAt).toLocaleTimeString([], {
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                    }),
-                                    role: msg.role,
-                                }),
-                            )
-                            setMessages(updatedMessages)
+                        return {
+                            shouldSendInitialMessage: true,
+                            initialPrompt: spaceResponse.space.initialPrompt
                         }
+                    } else {
+                        initializedRef.current = true
+                        setPageLoading(false)
                     }
-                } else {
-                    console.error("Failed to fetch messages:", response.error)
-                    setMessages([
-                        {
-                            type: "assistant",
-                            content: "Hello! I'm Project OM, your AI assistant. How can I help you today?",
-                            timestamp: new Date().toLocaleTimeString([], {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                            }),
-                            role: "ASSISTANT",
-                        },
-                    ])
                 }
             } catch (error) {
-                console.error("Error fetching messages:", error)
+                console.error("Error initializing chat:", error)
                 setMessages([
                     {
                         type: "assistant",
@@ -133,33 +110,75 @@ export default function ChatPage({ chatId }: { chatId: string }) {
                         role: "ASSISTANT",
                     },
                 ])
-            } finally {
-                setIsInitialLoad(false)
+                initializedRef.current = true
+                setPageLoading(false)
             }
+
+            return { shouldSendInitialMessage: false }
         }
 
-        fetchMessages()
+        fetchInitialData().then(result => {
+            if (result && result.shouldSendInitialMessage) {
+                setMessageLoading(true)
+            } else {
+                setPageLoading(false)
+            }
+        })
     }, [chatId])
 
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-    }, [messages, loading])
+        const sendInitialMessage = async () => {
+            if (!chatId || initializedRef.current || !messageLoading || messages.length === 0) return
 
-    const handleUserMessage = async (content: string, addToUI = true) => {
-        console.log("hey");
-        console.log(chatId);
-        if (!content.trim() || !chatId) return
-        console.log(content);
+            try {
+                const initialPrompt = messages[0].content
+                if (!initialPrompt) return
 
-        const currentTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                initializedRef.current = true
 
-        if (addToUI) {
-            const userMessage = { type: "user" as const, content, timestamp: currentTime }
-            setMessages((prev) => [...prev, userMessage])
-            setInputValue("")
+                const msgResponse = await sendMessage(initialPrompt, chatId, "USER")
+
+                if (msgResponse.success && msgResponse.assistantMessage) {
+                    const assistantTime = new Date().toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                    })
+
+                    setMessages(prev => [
+                        ...prev,
+                        {
+                            id: msgResponse.assistantMessageId,
+                            type: "assistant",
+                            content: msgResponse.assistantMessage,
+                            timestamp: assistantTime,
+                            role: "ASSISTANT"
+                        }
+                    ])
+                }
+            } catch (error) {
+                console.error("Error sending initial message:", error)
+            } finally {
+                setMessageLoading(false)
+                setPageLoading(false)
+            }
         }
 
-        setLoading(true)
+        sendInitialMessage()
+    }, [messageLoading, messages, chatId])
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }, [messages, messageLoading])
+
+    const handleUserMessage = async (content: string) => {
+        if (!content.trim() || !chatId) return
+
+        const currentTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        const userMessage = { type: "user" as const, content, timestamp: currentTime }
+
+        setMessages((prev) => [...prev, userMessage])
+        setInputValue("")
+        setMessageLoading(true)
 
         try {
             const response = await sendMessage(content, chatId as string, "USER")
@@ -194,131 +213,298 @@ export default function ChatPage({ chatId }: { chatId: string }) {
                 },
             ])
         } finally {
-            setLoading(false)
+            setMessageLoading(false)
         }
     }
 
     const handleRename = () => {
-        return null;
+        setIsEditingTitle(true);
+        setNewTitle(title || "");
+    }
+
+    const handleSaveRename = async () => {
+        if (!newTitle.trim() || !chatId) return;
+
+        setIsRenaming(true);
+        try {
+            const response = await updateSpaceTitle(chatId, newTitle.trim());
+
+            if (response.success) {
+                setTitle(newTitle.trim());
+                toast("Space renamed successfully");
+                setIsEditingTitle(false);
+            } else {
+                toast.error(response.error || "Failed to rename space");
+            }
+        } catch (error) {
+            console.error("Error renaming space:", error);
+            toast.error("An error occurred while renaming the space");
+        } finally {
+            setIsRenaming(false);
+        }
+    }
+    const handleFavourites = async (status: boolean) => {
+        try {
+            const response = await addAsFavourites(chatId, status);
+            if (!response) {
+                return null;
+            }
+
+            const updatedStatus = response?.space?.saved!;
+
+            setIsFavourite(updatedStatus);
+            toast(updatedStatus ? "Added to the favourites" : "Removed from the favourites");
+        } catch (err) {
+            console.log("Error occurred while marking the chat as favourites: " + err);
+        }
     }
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        console.log("Hey");
 
         try {
             await handleUserMessage(inputValue)
         } catch (err) {
-            console.log("Error occurred while subitting the messages: " + err);
+            console.log("Error occurred while submitting the messages: " + err)
         }
+    }
+
+    const truncateTitle = (text: string | null, maxLength: number = 25) => {
+        if (!text) return "";
+        return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
     }
 
     return (
         <div className="flex h-screen bg-[#121212] text-white">
-            <main className="flex-1 flex flex-col md:ml-64">
-                <div className="border-b border-[#222] p-4 flex justify-between items-center">
-                    <h1 className="text-lg font-medium">Chat {chatId ? `#${chatId}` : ""}</h1>
+            <main className="flex-1 h-full flex flex-col">
+                <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="border-b border-[#222] p-4 flex justify-between items-center bg-[#1a1a1a]"
+                >
+                    <h1 className="text-lg font-medium flex items-center gap-2">
+                        <motion.div
+                            whileHover={{ scale: 1.05 }}
+                            className="flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700"
+                        >
+                            <Bot className="h-4 w-4 text-white" />
+                        </motion.div>
+
+                        {
+                            isEditingTitle ? (
+                                <div className="flex items-center gap-2">
+                                    <Input
+                                        value={newTitle}
+                                        onChange={(e) => setNewTitle(e.target.value)}
+                                        className="h-8 bg-[#2a2a2a] border-[#333] text-white focus:ring-2 focus:ring-blue-500/50 focus:border-transparent w-40"
+                                        placeholder="Enter new title"
+                                        autoFocus
+                                        maxLength={50}
+                                    />
+                                    <div className="flex gap-1">
+                                        <Button
+                                            size="sm"
+                                            className="h-7 px-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
+                                            onClick={handleSaveRename}
+                                            disabled={!newTitle.trim() || isRenaming || newTitle.trim() === title}
+                                        >
+                                            {
+                                                isRenaming ? (
+                                                    <div className="h-3 w-3 border-2 border-t-transparent border-white rounded-full animate-spin" />
+                                                ) : (
+                                                    "Save"
+                                                )
+                                            }
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-7 px-2 hover:bg-[#2a2a2a]"
+                                            onClick={() => {
+                                                setIsEditingTitle(false);
+                                                setNewTitle(title || "");
+                                            }}
+                                        >
+                                            Cancel
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <span
+                                    className="truncate max-w-[200px] cursor-pointer hover:text-blue-400 transition-colors"
+                                    title={title || ""}
+                                    onClick={() => {
+                                        setIsEditingTitle(true);
+                                        setNewTitle(title || "");
+                                    }}
+                                >
+                                    {truncateTitle(title)}
+                                </span>
+                            )
+                        }
+                    </h1>
                     <div className="flex items-center justify-center gap-3">
-                        <Star
-                            className={``}
-                        />
+                        <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                            <Button
+                                onClick={() => handleFavourites(!isFavourite)}
+                                variant="ghost"
+                                size="icon"
+                                className="rounded-full p-2 hover:bg-gray-500 dark:hover:bg-gray-800 transition"
+                            >
+                                <Star
+                                    className={`h-10 w-10 ${isFavourite ? "fill-yellow-400 text-yellow-400" : "text-yellow-400"
+                                        } transition-colors duration-300`}
+                                />
+                            </Button>
+                        </motion.div>
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon">
-                                    <Ellipsis className="h-5 w-5" />
-                                </Button>
+                                <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}>
+                                    <Button onClick={handleRename} variant="ghost" size="icon" className="rounded-full">
+                                        <MoreHorizontal className="h-5 w-5 hover:text-white" />
+                                    </Button>
+                                </motion.div>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-40">
-                                <DropdownMenuItem onClick={handleRename}>
+                            <DropdownMenuContent align="end" className="w-48 bg-[#1e1e1e] border-[#333] text-white">
+                                <DropdownMenuItem onClick={handleRename} className="hover:bg-[#2a2a2a] focus:bg-[#2a2a2a]">
                                     <Pencil className="w-4 h-4 mr-2" />
-                                    Rename
+                                    Rename conversation
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
                     </div>
-                    {/* {
-                        chatId && spaceData && (
-                            <SaveChatToggle
-                                chatId={chatId}
-                                initialSavedState={spaceData.saved}
-                            />
-                        )
-                    } */}
-                </div>
-                <div className="flex-1 overflow-auto p-4" ref={messagesContainerRef}>
-                    <div className="max-w-3xl mx-auto space-y-6">
-                        {
-                            messages.map((message, index) => (
-                                <div
-                                    key={`${message.id || index}`}
-                                    className={`flex ${message.type === "user" ? "justify-end" : "justify-start"}`}
-                                >
-                                    <div className={`flex gap-3 max-w-[80%] ${message.type === "user" ? "flex-row-reverse" : ""}`}>
-                                        {
-                                            message.type === "assistant" ? (
-                                                <Avatar className="h-8 w-8 mt-1 ring-2 ring-blue-500 ring-opacity-50">
-                                                    <AvatarImage src="/assistant-avatar.png" alt="Assistant" />
-                                                    <AvatarFallback className="bg-gradient-to-br from-blue-600 to-indigo-700 h-full w-full flex items-center justify-center">
-                                                        <span className="text-xs font-bold">OM</span>
-                                                    </AvatarFallback>
-                                                </Avatar>
-                                            ) : message.type === "system" ? (
-                                                <Avatar className="h-8 w-8 mt-1 ring-2 ring-red-500 ring-opacity-50">
-                                                    <AvatarFallback className="bg-gradient-to-br from-red-600 to-red-800 h-full w-full flex items-center justify-center">
-                                                        <span className="text-xs font-bold">SYS</span>
-                                                    </AvatarFallback>
-                                                </Avatar>
-                                            ) : (
-                                                <Avatar className="h-8 w-8 mt-1 bg-gradient-to-br from-emerald-500 to-teal-700 ring-2 ring-emerald-400 ring-opacity-50">
-                                                    <AvatarFallback className="h-full w-full flex items-center justify-center">
-                                                        <User className="h-4 w-4 text-white" />
-                                                    </AvatarFallback>
-                                                </Avatar>
-                                            )
-                                        }
-                                        <div
-                                            className={`rounded-lg p-4 ${message.type === "user"
-                                                ? "bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-md"
-                                                : message.type === "system"
-                                                    ? "bg-red-900/30 text-red-200 border border-red-800/50"
-                                                    : "bg-gradient-to-br from-[#1e1e1e] to-[#2a2a2a] text-gray-200 shadow-md"
-                                                }`}
+                </motion.div>
+                <ScrollArea className="flex-1 h-full overflow-auto p-4">
+                    {
+                        pageLoading ? (
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ duration: 0.5 }}
+                                className="flex justify-center items-center h-screen"
+                            >
+                                <div className="flex flex-col items-center gap-4">
+                                    <motion.div
+                                        animate={{ scale: [1, 1.1, 1] }}
+                                        transition={{ repeat: Infinity, duration: 1.5 }}
+                                        className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center"
+                                    >
+                                        <Bot className="h-6 w-6 text-white" />
+                                    </motion.div>
+                                    <p className="text-gray-400">Loading conversation...</p>
+                                </div>
+                            </motion.div>
+                        ) : (
+                            <div className="max-w-3xl mx-auto space-y-6 pb-2">
+                                <AnimatePresence>
+                                    {
+                                        messages.map((message, index) => (
+                                            <motion.div
+                                                key={`${message.id || index}`}
+                                                initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                // transition={{ duration: 0.3, delay: index * 0.1 > 0.5 ? 0.5 : index * 0.1 }}
+                                                className={`flex ${message.type === "user" ? "justify-end" : "justify-start"}`}
+                                            >
+                                                <div className={`flex gap-3 max-w-[80%] ${message.type === "user" ? "flex-row-reverse" : ""}`}>
+                                                    {
+                                                        message.type === "assistant" ? (
+                                                            <div className="flex flex-col items-center">
+                                                                <Avatar className="h-9 w-9 ring-1 ring-blue-500 ring-opacity-50">
+                                                                    <AvatarImage src="/assistant-avatar.png" alt="Assistant" />
+                                                                    <AvatarFallback className="bg-gradient-to-br from-blue-600 to-indigo-700 h-full w-full flex items-center justify-center">
+                                                                        <span className="text-xs font-bold">OM</span>
+                                                                    </AvatarFallback>
+                                                                </Avatar>
+                                                                <span className="text-xs text-gray-400 mt-1">Assistant</span>
+                                                            </div>
+                                                        ) : message.type === "system" ? (
+                                                            <div className="flex flex-col items-center">
+                                                                <Avatar className="h-9 w-9 ring-1 ring-red-500 ring-opacity-50">
+                                                                    <AvatarFallback className="bg-gradient-to-br from-red-600 to-red-800 h-full w-full flex items-center justify-center">
+                                                                        <span className="text-xs font-bold">SYS</span>
+                                                                    </AvatarFallback>
+                                                                </Avatar>
+                                                                <span className="text-xs text-gray-400 mt-1">System</span>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex flex-col items-center">
+                                                                <Avatar className="h-9 w-9 ring-1 ring-emerald-400 ring-opacity-50">
+                                                                    {
+                                                                        user?.imageUrl ? (
+                                                                            <AvatarImage src={user.imageUrl || "/placeholder.svg"} alt="User" />
+                                                                        ) : (
+                                                                            <AvatarFallback className="bg-gradient-to-br from-emerald-500 to-teal-700 h-full w-full flex items-center justify-center">
+                                                                                <User className="h-4 w-4 text-white" />
+                                                                            </AvatarFallback>
+                                                                        )
+                                                                    }
+                                                                </Avatar>
+                                                                <span className="text-xs text-gray-400 mt-1">You</span>
+                                                            </div>
+                                                        )
+                                                    }
+                                                    <motion.div
+                                                        whileHover={{ scale: 1.01 }}
+                                                        className={`rounded-lg p-4 ${message.type === "user"
+                                                            ? "bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-md"
+                                                            : message.type === "system"
+                                                                ? "bg-red-900/30 text-red-200 border border-red-800/50"
+                                                                : "bg-gradient-to-br from-[#1e1e1e] to-[#2a2a2a] text-gray-200 shadow-md"
+                                                            }`}
+                                                    >
+                                                        <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                                                        <p className="text-xs mt-2 opacity-70">{message.timestamp}</p>
+                                                    </motion.div>
+                                                </div>
+                                            </motion.div>
+                                        ))
+                                    }
+                                </AnimatePresence>
+                                {
+                                    messageLoading && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: 20 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            transition={{ duration: 0.3 }}
+                                            className="flex justify-start"
                                         >
-                                            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                                            <p className="text-xs mt-2 opacity-70">{message.timestamp}</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))
-                        }
-                        {
-                            loading && (
-                                <div className="flex justify-start">
-                                    <div className="flex gap-3 max-w-[80%]">
-                                        <Avatar className="h-8 w-8 mt-1 ring-2 ring-blue-500 ring-opacity-50">
-                                            <AvatarFallback className="bg-gradient-to-br from-blue-600 to-indigo-700 h-full w-full flex items-center justify-center">
-                                                <span className="text-xs font-bold">OM</span>
-                                            </AvatarFallback>
-                                        </Avatar>
-                                        <div className="rounded-lg p-4 bg-gradient-to-br from-[#1e1e1e] to-[#2a2a2a] text-gray-200 shadow-md">
-                                            <div className="flex items-center space-x-1">
-                                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse delay-150"></div>
-                                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse delay-300"></div>
+                                            <div className="flex gap-3 max-w-[80%]">
+                                                <div className="flex flex-col items-center">
+                                                    <Avatar className="h-9 w-9 ring-1 ring-blue-500 ring-opacity-50">
+                                                        <AvatarFallback className="bg-gradient-to-br from-blue-600 to-indigo-700 h-full w-full flex items-center justify-center">
+                                                            <span className="text-xs font-bold">OM</span>
+                                                        </AvatarFallback>
+                                                    </Avatar>
+                                                    <span className="text-xs text-gray-400 mt-1">Assistant</span>
+                                                </div>
+                                                <motion.div
+                                                    animate={{ scale: [1, 1.02, 1] }}
+                                                    transition={{ repeat: Infinity, duration: 2 }}
+                                                    className="rounded-lg p-4 bg-gradient-to-br from-[#1e1e1e] to-[#2a2a2a] text-gray-200 shadow-md min-w-[200px]"
+                                                >
+                                                    <ThinkingAnimation />
+                                                </motion.div>
                                             </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )
-                        }
-                        <div ref={messagesEndRef} />
-                    </div>
-                </div>
-                <div className="border-t border-[#222] p-4">
+                                        </motion.div>
+                                    )
+                                }
+                                <div ref={messagesEndRef} />
+                            </div>
+                        )
+                    }
+                </ScrollArea>
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, delay: 0.2 }}
+                    className="border-t border-[#222] p-4 bg-[#1a1a1a]"
+                >
                     <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
                         <div className="relative">
                             <Textarea
-                                className="min-h-[60px] max-h-[200px] bg-[#1e1e1e] border-none rounded-lg pl-4 pr-12 py-3 text-white placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-blue-500/50"
+                                className="min-h-[60px] max-h-[200px] bg-[#1e1e1e] border border-[#333] rounded-lg pl-4 pr-12 py-3 text-white placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
                                 placeholder="Message Project OM..."
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
@@ -328,30 +514,86 @@ export default function ChatPage({ chatId }: { chatId: string }) {
                                         handleSubmit(e)
                                     }
                                 }}
-                                disabled={loading}
+                                disabled={pageLoading || messageLoading}
                             />
                             <div className="absolute right-2 bottom-2 flex gap-2">
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-gray-400 hover:text-white hover:bg-gray-800/50"
+                                <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="text-gray-400 hover:text-white hover:bg-gray-800/50 rounded-full"
+                                        disabled={pageLoading || messageLoading}
+                                    >
+                                        <Paperclip className="h-5 w-5" />
+                                    </Button>
+                                </motion.div>
+                                <motion.div
+                                    whileHover={{ scale: 1.1 }}
+                                    whileTap={{ scale: 0.95 }}
                                 >
-                                    <Paperclip className="h-5 w-5" />
-                                </Button>
-                                <Button
-                                    type="submit"
-                                    size="icon"
-                                    className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-full h-8 w-8"
-                                    disabled={!inputValue.trim() || loading}
-                                >
-                                    <ArrowUp className="h-4 w-4" />
-                                </Button>
+                                    <Button
+                                        type="submit"
+                                        size="icon"
+                                        className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-full h-8 w-8"
+                                        disabled={!inputValue.trim() || pageLoading || messageLoading}
+                                    >
+                                        <ArrowUp className="h-4 w-4" />
+                                    </Button>
+                                </motion.div>
                             </div>
                         </div>
                     </form>
-                </div>
+                </motion.div>
             </main>
+            {/* <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+                <DialogContent className="sm:max-w-md bg-[#1a1a1a] border-[#333] text-white">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Pencil className="h-5 w-5 text-blue-400" />
+                            Rename Conversation
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <Input
+                            value={newTitle}
+                            onChange={(e) => setNewTitle(e.target.value)}
+                            className="bg-[#1e1e1e] border-[#333] text-white focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+                            placeholder="Enter new title"
+                            aria-label="New conversation title"
+                            maxLength={50}
+                        />
+                    </div>
+                    <DialogFooter className="sm:justify-between">
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => setRenameDialogOpen(false)}
+                            className="text-gray-400 hover:text-white hover:bg-[#2a2a2a]"
+                            disabled={isRenaming}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={handleSaveRename}
+                            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white"
+                            disabled={!newTitle.trim() || isRenaming || newTitle.trim() === title}
+                        >
+                            {
+                                isRenaming ? (
+                                    <div className="flex items-center gap-2">
+                                        <div className="h-4 w-4 border-2 border-t-transparent border-white rounded-full animate-spin" />
+                                        Saving...
+                                    </div>
+                                ) : (
+                                    "Save"
+                                )
+                            }
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog> */}
         </div>
     )
 }

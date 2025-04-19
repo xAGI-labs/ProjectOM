@@ -14,14 +14,15 @@ enum Role {
 }
 
 model User {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
+  clerkId   String    @unique
   name      String
-  email     String   @unique
+  email     String    @unique
   avatar    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  // spaces    Space[]
-  // messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  spaces    Space[]
+  messages  Message[]
 }
 
 model Space {
@@ -31,8 +32,8 @@ model Space {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   saved         Boolean   @default(false)
-  // userId        String
-  // user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages      Message[]
 }
 
@@ -44,6 +45,6 @@ model Message {
   updatedAt DateTime @updatedAt
   spaceId   String
   space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  // userId    String
-  // user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
 }

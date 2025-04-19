@@ -45,7 +45,7 @@ export default function SavedChatsPage() {
         <div className="flex h-screen bg-[#121212] text-white">
             <main className="flex-1 flex flex-col">
                 <div className="border-b border-[#222] p-4 flex items-center">
-                    <div className="flex items-center gap-2 pl-10 h-10 md:pl-0">
+                    <div className="flex items-center gap-2 pl-10 h-10">
                         <BookmarkIcon className="h-5 w-5 text-yellow-500" />
                         <h1 className="text-lg font-medium">Saved Chats</h1>
                     </div>
@@ -71,7 +71,7 @@ export default function SavedChatsPage() {
                                     <p className="mt-2 text-sm">When you save a chat, it will appear here.</p>
                                 </div>
                             ) : (
-                                <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
+                                <div className="grid gap-4 sm:grid-cols-1">
                                     {
                                         spaces.map((space) => (
                                             <ChatSpaceCard

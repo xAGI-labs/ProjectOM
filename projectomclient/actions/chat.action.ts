@@ -4,18 +4,68 @@ import { revalidatePath } from 'next/cache'
 import { Role } from '@/lib/generated/prisma'
 import Anthropic from '@anthropic-ai/sdk'
 import { prisma } from '@/lib/prisma'
+import { auth, currentUser } from '@clerk/nextjs/server'
 
 const anthropic = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY || '',
 });
 
+async function syncUser() {
+    const { userId } = await auth();
+    if (!userId) {
+        throw new Error("Unauthorized");
+    }
+
+    const clerkUser = await currentUser();
+    if (!clerkUser) {
+        throw new Error("Clerk user not found");
+    }
+
+    const userData = {
+        clerkId: userId,
+        name: clerkUser.fullName || clerkUser.firstName || "Anonymous",
+        email: clerkUser.emailAddresses[0]?.emailAddress || "",
+        avatar: clerkUser.imageUrl || null,
+    };
+
+    const user = await prisma.user.upsert({
+        where: { clerkId: userId },
+        update: {
+            name: userData.name,
+            email: userData.email,
+            avatar: userData.avatar,
+        },
+        create: {
+            clerkId: userData.clerkId,
+            name: userData.name,
+            email: userData.email,
+            avatar: userData.avatar,
+        },
+    });
+
+    return user;
+}
+export async function fetchSpaceById(chatId: string) {
+    try {
+        const space = await prisma.space.findUnique({
+            where: {
+                id: chatId
+            },
+            select: {
+                initialPrompt: true,
+                title: true,
+                saved: true
+            },
+        });
+        return { success: !!space, space, error: space ? undefined : "Space not found" };
+    } catch (error) {
+        console.error("Error fetching space:", error);
+        return { success: false, space: null, error: "Internal server error" };
+    }
+}
 export async function createSpace(formData: FormData | { prompt: string }) {
     try {
-        // const session = await getServerSession(authOptions)
-
-        // if (!session?.user) {
-        //     throw new Error('Unauthorized')
-        // }
+        const user = await syncUser();
 
         const prompt = formData instanceof FormData
             ? formData.get('prompt')?.toString()
@@ -25,35 +75,24 @@ export async function createSpace(formData: FormData | { prompt: string }) {
             throw new Error('Invalid prompt')
         }
 
-        // const user = await prisma.user.findUnique({
-        //     where: {
-        //         email: session.user.email as string,
-        //     },
-        // })
-
-        // if (!user) {
-        //     throw new Error('User not found')
-        // }
-
         const space = await prisma.space.create({
             data: {
                 title: prompt.substring(0, 100),
                 initialPrompt: prompt,
-                // userId: user.id,
+                userId: user.id,
             },
         })
 
-        await prisma.message.create({
-            data: {
-                content: prompt,
-                role: 'USER',
-                spaceId: space.id,
-                // userId: user.id,
-            },
-        })
+        // await prisma.message.create({
+        //     data: {
+        //         content: prompt,
+        //         role: 'USER',
+        //         spaceId: space.id,
+        //         userId: user.id,
+        //     },
+        // })
 
-        // Revalidate the homepage path to update recent spaces
-        revalidatePath('/landingpage')
+        revalidatePath('/')
 
         return { success: true, spaceId: space.id }
     } catch (error) {
@@ -72,32 +111,16 @@ export type Space = {
 }
 export async function getRecentSpaces() {
     try {
-        // const session = await getServerSession(authOptions)
+        const user = await syncUser();
 
-        // if (!session?.user) {
-        //     throw new Error('Unauthorized')
-        // }
-
-        // // Get user ID from the session
-        // const user = await prisma.user.findUnique({
-        //     where: {
-        //         email: session.user.email as string,
-        //     },
-        // })
-
-        // if (!user) {
-        //     throw new Error('User not found')
-        // }
-
-        // Fetch recent spaces
         const spaces = await prisma.space.findMany({
-            // where: {
-            //     userId: user.id,
-            // },
+            where: {
+                userId: user.id,
+            },
             orderBy: {
                 createdAt: 'desc',
             },
-            take: 5,
+            take: 3,
             select: {
                 id: true,
                 title: true,
@@ -110,7 +133,7 @@ export async function getRecentSpaces() {
             success: true,
             spaces: spaces.map((space: Space) => ({
                 ...space,
-                createdAt: space.createdAt.toString()
+                createdAt: space.createdAt
             }))
         }
     } catch (error) {
@@ -132,10 +155,13 @@ export async function sendMessage(content: string, spaceId: string, role: Role =
             throw new Error('Space ID is required')
         }
 
-        // Check if the space exists
+        console.log("Called an api");
+        const user = await syncUser();
+
         const space = await prisma.space.findUnique({
             where: {
                 id: spaceId,
+                userId: user.id
             },
             include: {
                 messages: {
@@ -150,12 +176,12 @@ export async function sendMessage(content: string, spaceId: string, role: Role =
             throw new Error('Space not found')
         }
 
-        // Create the user message
         const userMessage = await prisma.message.create({
             data: {
                 content,
                 role,
                 spaceId,
+                userId: user?.id
             },
         })
 
@@ -185,10 +211,11 @@ export async function sendMessage(content: string, spaceId: string, role: Role =
                         content: assistantContent,
                         role: 'ASSISTANT',
                         spaceId,
+                        userId: user?.id
                     },
                 });
 
-                revalidatePath(`/chat/${spaceId}`);
+                revalidatePath(`/space/${spaceId}`);
 
                 return {
                     success: true,
@@ -198,12 +225,12 @@ export async function sendMessage(content: string, spaceId: string, role: Role =
                 }
             } catch (claudeError) {
                 console.error('Error generating AI response:', claudeError);
-
                 const errorMessage = await prisma.message.create({
                     data: {
                         content: "I'm sorry, I couldn't generate a response at the moment. Please try again later.",
                         role: 'ASSISTANT',
                         spaceId,
+                        userId: user?.id
                     },
                 });
 
@@ -235,40 +262,43 @@ export async function sendMessage(content: string, spaceId: string, role: Role =
 export async function getSpaceMessages(spaceId: string) {
     try {
         if (!spaceId) {
-            throw new Error('Space ID is required')
+            throw new Error("Space ID is required");
         }
 
-        const space = await prisma.space.findUnique({
+        const user = await syncUser();
+
+        const space = await prisma.space.findFirst({
             where: {
                 id: spaceId,
+                userId: user.id,
             },
             include: {
                 messages: {
                     orderBy: {
-                        createdAt: 'asc',
+                        createdAt: "asc",
                     },
                 },
             },
-        })
+        });
 
         if (!space) {
-            throw new Error('Space not found')
+            throw new Error("Space not found or unauthorized");
         }
 
         interface Message {
             id: string;
             content: string;
             role: Role;
-            createdAt: string;
-            updatedAt: string;
+            createdAt: Date;
+            updatedAt: Date;
         }
 
         interface SpaceWithMessages {
             id: string;
             title: string;
             initialPrompt: string;
-            createdAt: string;
-            updatedAt: string;
+            createdAt: Date;
+            updatedAt: Date;
             messages: Message[];
         }
 
@@ -281,15 +311,15 @@ export async function getSpaceMessages(spaceId: string) {
                 role: message.role,
                 createdAt: message.createdAt,
                 updatedAt: message.updatedAt,
-            }))
-        }
+            })),
+        };
     } catch (error) {
-        console.error('Error fetching space messages:', error);
+        console.error("Error fetching space messages:", error);
         return {
             success: false,
-            error: error instanceof Error ? error.message : 'Failed to fetch space messages',
-            messages: []
-        }
+            error: error instanceof Error ? error.message : "Failed to fetch space messages",
+            messages: [],
+        };
     }
 }
 export async function sendInitialAssistantMessage(spaceId: string) {
@@ -298,10 +328,12 @@ export async function sendInitialAssistantMessage(spaceId: string) {
             throw new Error('Space ID is required')
         }
 
-        // Check if the space exists
+        const user = await syncUser();
+
         const space = await prisma.space.findUnique({
             where: {
                 id: spaceId,
+                userId: user?.id
             },
             include: {
                 messages: {
@@ -316,7 +348,6 @@ export async function sendInitialAssistantMessage(spaceId: string) {
             throw new Error('Space not found')
         }
 
-        // If there are no messages, send a welcome message
         if (space.messages.length === 0) {
             const welcomeMessage = "Hello! I'm Manus, your AI assistant. How can I help you today?";
 
@@ -325,11 +356,11 @@ export async function sendInitialAssistantMessage(spaceId: string) {
                     content: welcomeMessage,
                     role: 'ASSISTANT',
                     spaceId,
+                    userId: user?.id
                 },
             });
 
-            // Revalidate the chat page path to update the messages
-            revalidatePath(`/chat/${spaceId}`);
+            revalidatePath(`/space/${spaceId}`);
 
             return {
                 success: true,
@@ -350,8 +381,7 @@ export async function sendInitialAssistantMessage(spaceId: string) {
         }
     }
 }
-
-export async function toggleChatSaved(spaceId: string, savedState: boolean) {
+export async function addAsFavourites(spaceId: string, savedState: boolean) {
     try {
         const updatedSpace = await prisma.space.update({
             where: { id: spaceId },
@@ -374,12 +404,18 @@ export async function toggleChatSaved(spaceId: string, savedState: boolean) {
         }
     }
 }
-
 export async function getSavedSpaces() {
+    const user = await syncUser();
+
     try {
         const spaces = await prisma.space.findMany({
-            where: { saved: true },
-            orderBy: { updatedAt: 'desc' },
+            where: { 
+                userId: user.id,
+                saved: true 
+            },
+            orderBy: { 
+                updatedAt: 'desc' 
+            },
             include: {
                 messages: {
                     take: 1,
@@ -400,10 +436,14 @@ export async function getSavedSpaces() {
         }
     }
 }
-
 export async function getAllSpaces() {
+    const user = await syncUser();
+
     try {
         const spaces = await prisma.space.findMany({
+            where: {
+                userId: user.id
+            },
             orderBy: { updatedAt: 'desc' },
             include: {
                 messages: {
@@ -423,5 +463,58 @@ export async function getAllSpaces() {
             success: false,
             error: "Failed to fetch all spaces"
         }
+    }
+}
+export async function updateSpaceTitle(spaceId: string, newTitle: string) {
+    try {
+        const user = await syncUser();
+
+        if (!user.id) {
+            return {
+                success: false,
+                error: "Unauthorized: You must be logged in to update a space title",
+            };
+        }
+
+        if (!newTitle.trim()) {
+            return {
+                success: false,
+                error: "Title cannot be empty",
+            };
+        }
+
+        const existingSpace = await prisma.space.findFirst({
+            where: {
+                id: spaceId,
+                userId: user.id,
+            },
+        });
+
+        if (!existingSpace) {
+            return {
+                success: false,
+                error: "Space not found or you don't have permission to update it",
+            };
+        }
+
+        const updatedSpace = await prisma.space.update({
+            where: {
+                id: spaceId,
+            },
+            data: {
+                title: newTitle.trim(),
+            },
+        });
+
+        return {
+            success: true,
+            space: updatedSpace,
+        };
+    } catch (error) {
+        console.error("Error updating space title:", error);
+        return {
+            success: false,
+            error: "Failed to update space title",
+        };
     }
 }

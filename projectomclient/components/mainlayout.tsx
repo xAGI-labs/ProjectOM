@@ -28,7 +28,7 @@ export default function MainLayout({
             <main
                 className={cn(
                     "flex-1 w-full transition-all duration-300 ease-in-out bg-[#0a0a0a]",
-                    isOpen ? "md:ml-[16rem]" : "ml-0"
+                    isOpen ? "md:ml-[18rem]" : "ml-0"
                 )}
             >
                 {children}
