@@ -19,7 +19,7 @@
 ## 🛠️ Tech Stack
 
 - **Frontend**: Next.js, Tailwind CSS
-- **Backend**: Python (optional), PostgreSQL, Prisma
+- **Backend**: Python (OpenManus), PostgreSQL, Prisma
 - **Authentication**: Clerk
 - **AI Integration**: Claude (Anthropic)
 - **Deployment**: Vercel (Frontend), Render/Fly.io/Docker (Backend)
@@ -28,6 +28,7 @@
 
 ## 🧰 Getting Started
 
+>  We are using the backend from the OpenManus open source project.
 > ⚠️ **Note**: The backend is not fully functional at the moment. Please explore the `projectomclient` folder only and start contributing to this part.
 
 ### 1. Clone the Repository
@@ -123,6 +124,13 @@ Make sure all your environment variables are properly set in the deployment plat
 
 We welcome contributions from everyone! Whether you're fixing bugs, improving docs, or adding features — we’d love your help.
 
+---
+
+## 👥 Contributors
+
+- [Niraj Jha](https://www.github.com/jha-niraj)
+- [Basab Jha](https://github.com/comethrusws)
+
 ### Guidelines
 
 - Fork the repo and create a new branch:
@@ -147,9 +155,7 @@ We welcome contributions from everyone! Whether you're fixing bugs, improving do
 ## 📬 Contact
 
 **GitHub Issues**: [Open an Issue](https://github.com/xAGI-labs/ProjectOM.git/issues)  
-**Email**: your-email@example.com
-
----
+**Email**: founders@likeo.me
 
 <!--## 📜 License-->
 
