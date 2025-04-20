@@ -128,8 +128,13 @@ We welcome contributions from everyone! Whether you're fixing bugs, improving do
 
 ## 👥 Contributors
 
-- [Niraj Jha](https://www.github.com/jha-niraj)
-- [Basab Jha](https://github.com/comethrusws)
+- [Saurav](https://github.com/sauravtom)
+- [Aviraj](https://github.com/avirajkhare00)
+- [Udit](https://github.com/uditkumar01)
+- [Basab](https://github.com/comethrusws)
+- [Niraj](https://www.github.com/jha-niraj)
+- [Ujjwal](https://github.com/UzitheI)
+- [Chandramani](https://github.com/Chandra2309)
 
 ### Guidelines
 
